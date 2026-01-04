@@ -14,7 +14,7 @@ class LanguageManager:
         Args:
             lang_code (str, optional): 'en' or 'tr'. Defaults to system locale.
         """
-        self.base_path = Path(__file__).resolve().parent.parent.parent / "locales"
+        self.base_path = Path(__file__).resolve().parent.parent / "locales"
         self.lang_code = lang_code or self._detect_system_lang()
         self.strings: Dict[str, str] = self._load_strings()
 

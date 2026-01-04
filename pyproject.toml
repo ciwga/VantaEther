@@ -41,3 +41,6 @@ include-package-data = true
 [tool.setuptools.packages.find]
 include = ["vantaether*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+"vantaether" = ["locales/*.json"]
