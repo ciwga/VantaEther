@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "VantaEther"
+version = "1.0"
+description = "VantaEther is an advanced media stream sniffer, analyzer, and downloader."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+  { name = "ciwga", email = "vantaether@tutanota.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Framework :: Flask",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+dependencies = [
+    "requests",
+    "yt-dlp",
+    "flask",
+    "rich"
+]
+
+[project.scripts]
+vantaether = "vantaether.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/ciwga/VantaEther"
+Issues = "https://github.com/ciwga/VantaEther/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["vantaether*"]
+namespaces = false
