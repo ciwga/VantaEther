@@ -202,10 +202,16 @@ class Downloader:
             return None
 
         table = Table(title=lang.get("quality_options"), header_style="bold magenta")
-        table.add_column(lang.get("table_id"), justify="center")
-        table.add_column(lang.get("resolution"))
-        table.add_column(lang.get("table_bitrate"))
-        table.add_column(lang.get("table_ext"))
+        
+        # Adding columns with no_wrap=True to guarantee layout stability on smaller screens
+        table.add_column(lang.get("table_id"), justify="center", no_wrap=True)
+        table.add_column(lang.get("resolution"), no_wrap=True)
+        table.add_column(lang.get("table_bitrate"), no_wrap=True)
+        
+        # Codec column: Added with overflow protection
+        table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
+        
+        table.add_column(lang.get("table_ext"), no_wrap=True)
         table.add_column(lang.get("audio_status"), style="cyan")
 
         for idx, f in enumerate(unique_fmts, 1):
@@ -215,10 +221,17 @@ class Downloader:
                 else lang.get("video_only")
             )
             tbr = f"{int(f.get('tbr', 0) or 0)}k"
+            
+            # Extract video codec
+            vcodec = f.get("vcodec", "unknown")
+            if vcodec == "none":
+                vcodec = "images"
+
             table.add_row(
                 str(idx),
                 f"{f.get('height')}p",
                 tbr,
+                vcodec,
                 f.get("ext", "mp4"),
                 audio_status,
             )
@@ -333,17 +346,26 @@ class Downloader:
                         table = Table(
                             title=lang.get("audio_sources"), header_style="bold yellow"
                         )
-                        table.add_column(lang.get("table_id"), justify="center")
-                        table.add_column("Format ID")
+                        table.add_column(lang.get("table_id"), justify="center", no_wrap=True)
+                        table.add_column("Format ID", no_wrap=True)
+                        # Added codec column with overflow protection
+                        table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
                         table.add_column(lang.get("language") + " / Note")
-                        table.add_column(lang.get("table_bitrate"))
+                        table.add_column(lang.get("table_bitrate"), no_wrap=True)
 
                         for idx, af in enumerate(unique_audios, 1):
                             curr_lang = (
                                 af.get("language") or af.get("format_note") or "Unknown"
                             )
                             tbr = f"{int(af.get('tbr', 0) or 0)}k"
-                            table.add_row(str(idx), af["format_id"], curr_lang, tbr)
+                            acodec = af.get("acodec", "unknown")
+                            table.add_row(
+                                str(idx), 
+                                af["format_id"], 
+                                acodec,
+                                curr_lang, 
+                                tbr
+                            )
 
                         console.print(table)
                         a_choice = Prompt.ask(
@@ -660,11 +682,10 @@ class Downloader:
             )
 
             if should_merge:
-                # Note: StreamMerger needs to be path-aware. 
-                # Assuming StreamMerger handles full paths if provided.
+
                 StreamMerger.process_external_sub_sync(
                     sub["url"] if (sub and sub["type"] == "external") else None,
-                    str(base_output), # Pass full base path (without extension)
+                    str(base_output),
                     embed_mode,
                     http_headers,
                     actual_ext,
