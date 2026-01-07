@@ -4,8 +4,8 @@ import urllib3
 from typing import Tuple, Optional
 
 from rich.panel import Panel
-from rich.prompt import Prompt
 from rich.console import Console
+from rich.prompt import Prompt, Confirm
 from yt_dlp.extractor import gen_extractors
 
 from vantaether.config import BANNER
@@ -19,6 +19,30 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 console = Console()
 lang = LanguageManager()
+
+
+def show_legal_disclaimer() -> bool:
+    """
+    Displays the mandatory legal disclaimer and terms of use.
+    The user must explicitly accept these terms to proceed.
+    
+    Returns:
+        bool: True if accepted, False otherwise.
+    """
+    console.clear()
+    console.print(Panel(
+        f"[bold white]{lang.get('disclaimer_text')}[/]",
+        title=f"[bold red]{lang.get('disclaimer_title')}[/]",
+        border_style="red",
+        expand=False
+    ))
+    
+    if Confirm.ask(f"\n[bold yellow]{lang.get('choice')}? [/]"):
+        console.print(f"[green]{lang.get('disclaimer_accepted')}[/]\n")
+        return True
+    else:
+        console.print(f"[red]{lang.get('disclaimer_rejected')}[/]")
+        return False
 
 
 def is_natively_supported(url: str) -> Tuple[bool, Optional[str]]:
@@ -62,6 +86,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # --- LEGAL CHECK ---
+    # Display the legal disclaimer at the very start of the execution.
+    if not show_legal_disclaimer():
+        sys.exit(0)
 
     render_banner(console)
 
@@ -128,8 +157,6 @@ def main() -> None:
             console.print(f"[bold red]{lang.get('native_mode_error', error=e)}[/]")
     else:
         # Fallback to Manual/Sync Mode (Engine) if native support fails
-        # Note: Engine currently doesn't support the CLI audio flag directly in the same way,
-        # but it has its own interactive flow.
         console.print(Panel(
             lang.get("protected_desc"),
             title=lang.get("protected_site"),
