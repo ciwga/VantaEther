@@ -1,4 +1,4 @@
 requests
-yt-dlp
-flask
-rich
+yt-dlp==2025.12.8
+flask==3.1.2
+rich==14.2.0
