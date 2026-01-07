@@ -88,10 +88,13 @@ class DirectoryResolver:
         """
         # Android Detection Logic (Specific to Termux/Android environments)
         if "ANDROID_ROOT" in os.environ:
-            android_base = Path("/storage/emulated/0/Download")
-            app_dir = self._ensure_app_directory(android_base)
-            if app_dir:
-                return app_dir
+            try:
+                android_base = Path("/storage/emulated/0/Download")
+                app_dir = self._ensure_app_directory(android_base)
+                if app_dir:
+                    return app_dir
+            except (PermissionError, OSError) as e:
+                console.print(f"[yellow]{lang.get('android_dir_error', error=e)}[/]")
 
         # Standard OS Downloads Folder
         try:
