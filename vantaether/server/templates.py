@@ -34,11 +34,22 @@ def render_html_page(lang_manager: Any) -> str:
         h1 {{ color: #00ff41; margin-bottom: 30px; }}
         .container {{ border: 1px solid #30363d; padding: 20px; background: #161b22; margin: 0 auto; max-width: 800px; border-radius: 8px; }}
         textarea {{ width: 100%; height: 200px; background: #0d1117; color: #79c0ff; border: 1px solid #30363d; padding: 10px; border-radius: 4px; resize: none; }}
-        button {{ width: 100%; padding: 15px; background: #238636; color: #fff; border: none; margin-top: 15px; cursor: pointer; font-weight: bold; font-size: 16px; border-radius: 4px; transition: background 0.2s; }}
-        button:hover {{ background: #2ea043; }}
+        
+        .btn-group {{ display: flex; gap: 10px; margin-top: 15px; }}
+        
+        button {{ flex: 1; padding: 15px; border: none; cursor: pointer; font-weight: bold; font-size: 16px; border-radius: 4px; transition: background 0.2s; color: #fff; }}
+        
+        .btn-copy {{ background: #238636; }}
+        .btn-copy:hover {{ background: #2ea043; }}
+        
+        .btn-install {{ background: #1f6feb; }}
+        .btn-install:hover {{ background: #388bfd; }}
+        
         .instructions {{ text-align: left; margin: 20px 0; line-height: 1.6; }}
         .status-box {{ font-size: 1.5em; color: #e3b341; margin-top: 30px; padding: 15px; border: 1px dashed #30363d; }}
         .step {{ font-weight: bold; color: #ffffff; }}
+        
+        a.install-link {{ text-decoration: none; display: flex; flex: 1; }}
     </style>
 </head>
 <body>
@@ -61,27 +72,45 @@ def render_html_page(lang_manager: Any) -> str:
 
         <h3>{t('html_script_title')}</h3>
         <textarea id="code" readonly>{{{{ script }}}}</textarea>
-        <button onclick="navigator.clipboard.writeText(document.getElementById('code').value);alert('{t('html_copied_alert')}')">{t('html_copy_btn')}</button>
+        
+        <div class="btn-group">
+            <button class="btn-copy" onclick="navigator.clipboard.writeText(document.getElementById('code').value);alert('{t('html_copied_alert')}')">
+                {t('html_copy_btn')}
+            </button>
+            <a href="/vantaether.user.js" class="install-link">
+                <button class="btn-install">
+                    {t('html_install_btn')}
+                </button>
+            </a>
+        </div>
     </div>
 
     <div id="status" class="status-box">{t('html_status_waiting')}</div>
     
     <script>
-        setInterval(()=>{{
-            fetch('/status').then(r=>r.json()).then(d=>{{
-                const videoCount = d.video_count;
-                const subCount = d.sub_count;
+        // Server-Sent Events (SSE) for Real-time Updates
+        // Replaces inefficient polling (setInterval)
+        const evtSource = new EventSource("/stream");
+        
+        evtSource.onmessage = function(event) {{
+            const d = JSON.parse(event.data);
+            const videoCount = d.video_count;
+            const subCount = d.sub_count;
+            
+            if(videoCount > 0){{
+                let msg = "{t('html_js_videos_prefix')}" + videoCount + " {t('html_js_video_captured')}";
+                if(subCount > 0) msg += " | " + subCount + " {t('html_js_subtitle_captured')}";
                 
-                if(videoCount > 0){{
-                    let msg = "{t('html_js_videos_prefix')}" + videoCount + " {t('html_js_video_captured')}";
-                    if(subCount > 0) msg += " | " + subCount + " {t('html_js_subtitle_captured')}";
-                    const el = document.getElementById('status');
-                    el.innerText = msg;
-                    el.style.color = "#00ff41";
-                    el.style.borderColor = "#00ff41";
-                }}
-            }})
-        }}, 1000);
+                const el = document.getElementById('status');
+                el.innerText = msg;
+                el.style.color = "#00ff41";
+                el.style.borderColor = "#00ff41";
+            }}
+        }};
+        
+        evtSource.onerror = function() {{
+            console.log("SSE Connection lost, retrying...");
+        }};
     </script>
 </body>
 </html>
