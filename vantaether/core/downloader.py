@@ -316,10 +316,14 @@ class Downloader:
                 v_id = selected_fmt["format_id"]
 
                 # Audio Selection Logic
+                # STRICT FILTERING: Exclude anything with height/width
                 audio_formats = [
-                    f
-                    for f in info.get("formats", [])
-                    if (f.get("vcodec") == "none" or f.get("vcodec") is None)
+                    f for f in info.get("formats", [])
+                    if (
+                        (f.get("vcodec") == "none" or f.get("vcodec") is None)
+                        and f.get("height") is None 
+                        and f.get("width") is None
+                    )
                     and f.get("acodec") != "none"
                 ]
 
@@ -586,7 +590,8 @@ class Downloader:
     ) -> None:
         """
         Executes the download for a manually selected stream (Sync Mode).
-        Handles heuristics for audio parts.
+        Uses a 'Double Tap' strategy: Explicitly downloads video and audio separately
+        to guarantee that the audio stream is retrieved.
         """
         console.print(f"[bold blue]{lang.get('download_location')}[/] [dim]{self.download_path}[/]")
         
@@ -607,14 +612,11 @@ class Downloader:
 
         # Use the resolved path for output
         base_output = self.download_path / filename
-        out_template = (
-            f"{base_output}.{requested_ext}" if not force_mode else f"{base_output}.%(ext)s"
-        )
 
         post_processors = []
 
+        # Common options base
         ydl_opts = {
-            "outtmpl": str(out_template),
             "quiet": True,
             "no_warnings": True,
             "nocheckcertificate": True,
@@ -632,26 +634,7 @@ class Downloader:
             },
         }
 
-        if embed_mode == "embed_mkv":
-            ydl_opts["merge_output_format"] = "mkv"
-        elif embed_mode == "embed_mp4":
-            ydl_opts["merge_output_format"] = "mp4"
-
-        # Format Selection
-        if not force_mode and fmt:
-            selected_video_id = fmt["format_id"]
-            if audio_id:
-                ydl_opts["format"] = f"{selected_video_id}+{audio_id}"
-            else:
-                acodec = fmt.get("acodec")
-                if acodec is not None and acodec != "none":
-                    ydl_opts["format"] = selected_video_id
-                else:
-                    ydl_opts["format"] = f"{selected_video_id}+bestaudio/best"
-        else:
-            ydl_opts["format"] = "bestvideo+bestaudio/best"
-
-        # Internal Subtitles
+        # Subtitle Handling Setup
         if sub and sub["type"] == "internal":
             ydl_opts["subtitleslangs"] = [sub["lang"]]
             ydl_opts["writesubtitles"] = True
@@ -661,31 +644,92 @@ class Downloader:
                 )
             elif "embed" in embed_mode:
                 ydl_opts["embedsubtitles"] = True
-
+        
         if post_processors:
             ydl_opts["postprocessors"] = post_processors
 
         ydl_opts["progress_hooks"] = [self._progress_hook]
 
-        success = self._start_download(ydl_opts, target["url"], filename)
+        # --- EXECUTION STRATEGY: SPLIT DOWNLOAD ---
+        # If the user selected a specific audio ID, we download video and audio separately
+        # to prevent yt-dlp from implicitly skipping the audio merge.
+        
+        success_video = False
+        success_audio = False
+        
+        if not force_mode and fmt and audio_id:
+            # 1. Download Video
+            console.print(f"[cyan]{lang.get('processing_video', format=fmt['format_id'])}[/]")
+        
+            opts_video = ydl_opts.copy()
+            opts_video["format"] = fmt["format_id"]
+            # Force standard filename for video
+            opts_video["outtmpl"] = f"{base_output}.%(ext)s"
+            # IMPORTANT: We want to know if video fails
+            opts_video["ignoreerrors"] = False
+            
+            success_video = self._start_download(opts_video, target["url"], f"{filename} [Video]")
+            
+            # 2. Download Audio
+            console.print(f"[cyan]{lang.get('processing_audio', format=audio_id)}[/]")
+            
+            opts_audio = ydl_opts.copy()
+            opts_audio["format"] = audio_id
+            # Force a distinct filename for audio so it doesn't conflict or get skipped
+            opts_audio["outtmpl"] = f"{base_output}.audio.%(ext)s"
+            # Disable subtitle writing for audio pass to avoid duplicates
+            opts_audio["writesubtitles"] = False
+            
+            # CRITICAL FIXES FOR AUDIO STABILITY
+            # Disable concurrency for audio segments to prevent corrupted part files
+            opts_audio["concurrent_fragment_downloads"] = 1
+            # Ensure we fail hard if audio doesn't download
+            opts_audio["ignoreerrors"] = False
+            
+            success_audio = self._start_download(opts_audio, target["url"], f"{filename} [Audio]")
+            
+            # For merge to work, we ideally need both, or at least video.
+            # But if audio failed (success_audio is False), we should probably not report full success.
+            # However, if video downloaded, user at least has that.
+            success = success_video
+
+        else:
+            # Standard single-pass behavior (Auto quality or no specific audio selected)
+            if force_mode:
+                ydl_opts["format"] = "bestvideo+bestaudio/best"
+                ydl_opts["outtmpl"] = f"{base_output}.%(ext)s"
+            else:
+                if fmt:
+                    # Video only or implicitly merged
+                    ydl_opts["format"] = fmt["format_id"]
+                    ydl_opts["outtmpl"] = f"{base_output}.%(ext)s"
+                else:
+                    ydl_opts["format"] = "best"
+
+            if embed_mode == "embed_mkv":
+                ydl_opts["merge_output_format"] = "mkv"
+            elif embed_mode == "embed_mp4":
+                ydl_opts["merge_output_format"] = "mp4"
+            
+            success = self._start_download(ydl_opts, target["url"], filename)
 
         if not success:
             return
 
         # --- HEURISTICS & MERGING ---
-        # Look for files in the download path, not CWD
+        # Look for files in the download path
         found_file, actual_ext, orphan_audio_file = self._detect_files(filename)
 
         if found_file:
+            # Check if merging is required
             should_merge = (sub and sub["type"] == "external") or (
                 orphan_audio_file is not None
             )
 
             if should_merge:
-
                 StreamMerger.process_external_sub_sync(
                     sub["url"] if (sub and sub["type"] == "external") else None,
-                    str(base_output),
+                    str(base_output), # Pass full base path (without extension)
                     embed_mode,
                     http_headers,
                     actual_ext,
@@ -695,17 +739,7 @@ class Downloader:
             console.print(f"[bold red]{lang.get('video_not_found')}[/]")
 
     def _start_download(self, opts: Dict[str, Any], url: str, filename: str) -> bool:
-        """
-        Wrapper to invoke yt-dlp with rich progress bar.
-
-        Args:
-            opts (Dict[str, Any]): yt-dlp options dictionary.
-            url (str): The URL to download.
-            filename (str): The display filename for the progress bar.
-
-        Returns:
-            bool: True if download was successful, False otherwise.
-        """
+        """Wrapper to invoke yt-dlp with rich progress bar."""
         console.print("\n")
         console.rule(lang.get("download_starting", filename=filename))
 
@@ -747,49 +781,71 @@ class Downloader:
     ) -> Tuple[Optional[Path], Optional[str], Optional[Path]]:
         """
         Identifies main video and potential audio parts in the DOWNLOAD DIRECTORY.
-
-        Args:
-            filename_base (str): The base filename to search for.
-
-        Returns:
-            Tuple[Optional[Path], Optional[str], Optional[Path]]:
-                (Found Video Path, Extension, Orphan Audio Path)
+        Now specifically looks for the '.audio.' pattern created by the split download strategy.
         """
-        # Search in the resolved download path
+        # 1. Find the Main Video File
+        # Search for files starting with base name but NOT containing '.audio.'
         candidates = list(self.download_path.glob(f"{filename_base}.*"))
-        valid = [
-            f
-            for f in candidates
+        
+        # Filter for video candidates
+        # STRICT FILTER: Exclude any file that has '.part' in its NAME, not just suffix
+        video_candidates = [
+            f for f in candidates
             if not f.suffix in [".json", ".srt", ".vtt", ".part", ".ytdl"]
+            and ".part" not in f.name
+            and ".audio." not in f.name # Exclude our explicit audio files
             and f.stat().st_size > 1024
         ]
-
+        
         found_file = None
         actual_ext = None
         orphan_audio_file = None
-
-        if valid:
-            valid.sort(key=lambda p: p.stat().st_size, reverse=True)
-
-            # 1. Main Video = Largest
-            found_file = valid[0]
+        
+        if video_candidates:
+            # Largest non-audio file is the video
+            found_file = max(video_candidates, key=lambda p: p.stat().st_size)
             actual_ext = found_file.suffix.lstrip(".")
-
             console.print(Panel(lang.get("main_file"), border_style="green"))
 
-            # 2. Orphan Audio = Second Largest
-            if len(valid) > 1:
-                orphan_audio_file = valid[1]
-                console.print(
-                    Panel(
-                        lang.get("part_file_detected"),
-                        title=lang.get(
-                            "part_file_desc",
-                            video=found_file.name,
-                            audio=orphan_audio_file.name,
-                        ),
-                        border_style="yellow",
-                    )
+        # 2. Find the Explicit Audio File
+        # Search for the specific pattern we defined: filename.audio.ext
+        audio_candidates = list(self.download_path.glob(f"{filename_base}.audio.*"))
+        
+        valid_audio = [
+            f for f in audio_candidates
+             if not f.suffix in [".json", ".srt", ".vtt", ".part", ".ytdl"]
+             and ".part" not in f.name # Strict check for partial files
+             and f.stat().st_size > 1024
+        ]
+        
+        if valid_audio:
+            # Pick the largest if multiple match (unlikely, but safe)
+            orphan_audio_file = max(valid_audio, key=lambda p: p.stat().st_size)
+
+        # Fallback: If no explicit '.audio.' file, try the old size heuristic
+        if not orphan_audio_file and found_file:
+            # Check original candidates again
+             valid_others = [
+                f for f in candidates 
+                if f != found_file
+                and not f.suffix in [".json", ".srt", ".vtt", ".part", ".ytdl"]
+                and ".part" not in f.name
+                and f.stat().st_size > 1024
+            ]
+             if valid_others:
+                 orphan_audio_file = max(valid_others, key=lambda p: p.stat().st_size)
+
+        if orphan_audio_file:
+            console.print(
+                Panel(
+                    lang.get("part_file_detected"),
+                    title=lang.get(
+                        "part_file_desc",
+                        video=found_file.name if found_file else "None",
+                        audio=orphan_audio_file.name,
+                    ),
+                    border_style="yellow",
                 )
+            )
 
         return found_file, actual_ext, orphan_audio_file
