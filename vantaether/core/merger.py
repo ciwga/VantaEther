@@ -37,6 +37,10 @@ class StreamMerger:
 
         if audio_file:
             audio_file = Path(audio_file)
+            # Safety check: Do not attempt to merge partial files
+            if ".part" in audio_file.name or not audio_file.exists():
+                console.print(f"[bold red]Skipping merge: Audio file is incomplete or missing: {audio_file}[/]")
+                audio_file = None
 
         if url:
             console.print(f"[cyan]{lang.get('download_external_sub')}[/]")
@@ -69,22 +73,20 @@ class StreamMerger:
             video_file = Path(f"{fname}.{video_ext}")
             
             # Re-verify existence using pathlib glob
-            # This is crucial for files named like 'video.f720p.mp4' where suffix detection might vary
             if not video_file.exists():
-                # Handle absolute paths correctly for globbing.
-                
                 f_path = Path(fname)
                 search_dir = f_path.parent
                 stem_name = f_path.name
 
                 candidates = []
                 if search_dir.exists():
-                    # Glob specifically inside the target directory
                     candidates = list(search_dir.glob(f"{stem_name}.*"))
                 
                 valid = [
                     f for f in candidates
-                    if not f.suffix in [".json", ".srt", ".vtt"]
+                    if not f.suffix in [".json", ".srt", ".vtt", ".part", ".ytdl"]
+                    and ".part" not in f.name
+                    and ".audio." not in f.name # Exclude our explicit audio files from being detected as video
                 ]
                 if valid:
                     # Pick largest as video (safest assumption for video vs thumbnail/logs)
@@ -107,7 +109,9 @@ class StreamMerger:
             cmd.extend(["-map", "0:v"])  # Video from input 0
 
             if audio_file:
-                cmd.extend(["-map", "1:a"])  # Audio from input 1
+                # If the 'audio' file is actually a video without audio tracks (user error),
+                # FFmpeg will ignore this map instead of crashing.
+                cmd.extend(["-map", "1:a?"])  
             else:
                 cmd.extend(["-map", "0:a?"]) # Audio from input 0 (if valid)
 
@@ -143,18 +147,26 @@ class StreamMerger:
             if res.returncode == 0 and output_file.exists():
                 # Only delete parts if merge was successful
                 if video_file.exists() and video_file != output_file:
-                    video_file.unlink()
+                    try:
+                        video_file.unlink()
+                    except OSError: pass
                 if audio_file and audio_file.exists():
-                    audio_file.unlink()
+                    try:
+                        audio_file.unlink()
+                    except OSError: pass
 
                 final_name = Path(f"{fname}.{target_output_ext}")
                 if final_name.exists():
-                    final_name.unlink()
+                    try:
+                        final_name.unlink()
+                    except OSError: pass
                 
                 output_file.rename(final_name)
 
                 if final_sub and Path(final_sub).exists():
-                    Path(final_sub).unlink()
+                    try:
+                        Path(final_sub).unlink()
+                    except OSError: pass
 
                 console.print(f"[bold green]{lang.get('muxing_complete', filename=final_name)}[/]")
             else:
