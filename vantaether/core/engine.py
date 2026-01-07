@@ -71,7 +71,10 @@ class VantaEngine:
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
 
-        pool = get_pool()
+        # REMOVED: pool = get_pool() 
+        # Reason: The new app.py architecture returns a snapshot, not a mutable reference.
+        # We must fetch the pool INSIDE the loops to get fresh data.
+        
         selected_target = None
 
         try:
@@ -82,8 +85,12 @@ class VantaEngine:
                     spinner="earth",
                 ):
                     while True:
-                        with pool["lock"]:
-                            if len(pool["videos"]) > 0:
+                        # REFACTOR: Fetch fresh snapshot in every iteration
+                        current_pool = get_pool()
+                        
+                        # Lock usage is kept for compatibility, though snapshot is already thread-safe
+                        with current_pool["lock"]:
+                            if len(current_pool["videos"]) > 0:
                                 break
                         time.sleep(0.5)
 
@@ -96,8 +103,12 @@ class VantaEngine:
                 table.add_column(lang.get("url_short"), style="green")
 
                 current_videos = []
-                with pool["lock"]:
-                    current_videos = list(pool["videos"])
+                
+                # REFACTOR: Fetch fresh snapshot for display
+                display_pool = get_pool()
+                
+                with display_pool["lock"]:
+                    current_videos = list(display_pool["videos"])
 
                 for idx, vid in enumerate(current_videos, 1):
                     u = vid["url"]
@@ -116,7 +127,7 @@ class VantaEngine:
 
                 console.print(table)
                 console.print(
-                    f"\n[dim]{lang.get('video_count', video_count=len(current_videos), sub_count=len(pool['subs']))}[/]"
+                    f"\n[dim]{lang.get('video_count', video_count=len(current_videos), sub_count=len(display_pool['subs']))}[/]"
                 )
                 console.print(f"[bold yellow]{lang.get('options')}[/]")
                 console.print(f"  [bold white]{lang.get('enter_id')}[/]")
@@ -344,7 +355,9 @@ class VantaEngine:
                     }
                     sub_idx += 1
 
+        # REFACTOR: Fetch fresh snapshot for subtitle checking
         pool = get_pool()
+        
         with pool["lock"]:
             for s_data in pool["subs"]:
                 url = s_data["url"]
@@ -475,6 +488,6 @@ class VantaEngine:
             if c_file and Path(c_file).exists():
                 try:
                     Path(c_file).unlink()
-                    console.print(f"[dim]{lang.get(cookies_deleted)}[/]")
+                    console.print(f"[dim]{lang.get('cookies_deleted')}[/]")
                 except OSError:
                     pass
