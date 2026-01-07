@@ -21,7 +21,7 @@ from vantaether.utils.i18n import LanguageManager
 from vantaether.core.downloader import Downloader
 from vantaether.core.analyzer import MediaAnalyzer
 from vantaether.utils.cookies import create_cookie_file
-from vantaether.server.app import VantaServer, get_pool
+from vantaether.server.app import VantaServer, capture_manager
 from vantaether.utils.system import check_systems, clear_screen
 
 
@@ -51,6 +51,7 @@ class VantaEngine:
     def wait_for_target_interactive(self) -> Optional[Dict[str, Any]]:
         """
         Displays an interactive table of captured streams.
+        Uses threading.Event to wait efficiently instead of busy-waiting.
         
         Returns:
             Optional[Dict[str, Any]]: The selected video target object.
@@ -71,28 +72,23 @@ class VantaEngine:
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
 
-        # REMOVED: pool = get_pool() 
-        # Reason: The new app.py architecture returns a snapshot, not a mutable reference.
-        # We must fetch the pool INSIDE the loops to get fresh data.
-        
         selected_target = None
 
         try:
             while True:
-                # Wait for at least one video to appear
+                # Optimized waiting loop
                 with console.status(
                     f"[bold yellow]{lang.get('waiting_signal')}[/]",
                     spinner="earth",
                 ):
                     while True:
-                        # REFACTOR: Fetch fresh snapshot in every iteration
-                        current_pool = get_pool()
+                        # Check current state first
+                        current_status = capture_manager.get_status()
+                        if current_status["video_count"] > 0:
+                            break
                         
-                        # Lock usage is kept for compatibility, though snapshot is already thread-safe
-                        with current_pool["lock"]:
-                            if len(current_pool["videos"]) > 0:
-                                break
-                        time.sleep(0.5)
+                        # Wait for event notification instead of sleep loop
+                        capture_manager.wait_for_item(timeout=1.0)
 
                 clear_screen()
                 console.print(Align.center(BANNER), style="bold magenta")
@@ -104,11 +100,9 @@ class VantaEngine:
 
                 current_videos = []
                 
-                # REFACTOR: Fetch fresh snapshot for display
-                display_pool = get_pool()
-                
-                with display_pool["lock"]:
-                    current_videos = list(display_pool["videos"])
+                # Fetch fresh snapshot directly from capture_manager
+                display_pool = capture_manager.get_snapshot()
+                current_videos = list(display_pool["videos"])
 
                 for idx, vid in enumerate(current_videos, 1):
                     u = vid["url"]
@@ -158,7 +152,7 @@ class VantaEngine:
     ) -> Tuple[Any, Optional[str], Any, str, str, bool]:
         """
         Analyzes target and prompts user for quality selection.
-        
+
         Args:
             target: The target video dictionary containing URL and cookies.
             
@@ -210,13 +204,15 @@ class VantaEngine:
             ):
                 return None, None, None, "raw", c_file, True
             else:
-                # Recursively try again, but ensure we clean up the previous cookie file
                 if Path(c_file).exists():
-                    Path(c_file).unlink()
+                    try:
+                        Path(c_file).unlink()
+                    except OSError: pass
+                
                 new_target = self.wait_for_target_interactive()
                 if new_target:
                      return self.analyze_and_select(new_target)
-                return None, None, None, "raw", "", False # Exit case
+                return None, None, None, "raw", "", False 
 
         # Quality Selection
         formats = info.get("formats", [])
@@ -285,10 +281,15 @@ class VantaEngine:
             acodec = selected_fmt.get("acodec")
             selected_is_silent = acodec is None or acodec == "none"
 
+        # STRICT FILTERING for Audio Formats
+        # Only accept formats with NO video codec OR explicitly NO height/width
         audio_formats = [
-            f
-            for f in formats
-            if (f.get("vcodec") == "none" or f.get("vcodec") is None)
+            f for f in formats
+            if (
+                (f.get("vcodec") == "none" or f.get("vcodec") is None) 
+                and f.get("height") is None 
+                and f.get("width") is None
+            )
             and f.get("acodec") != "none"
         ]
 
@@ -355,20 +356,18 @@ class VantaEngine:
                     }
                     sub_idx += 1
 
-        # REFACTOR: Fetch fresh snapshot for subtitle checking
-        pool = get_pool()
+        pool = capture_manager.get_snapshot()
         
-        with pool["lock"]:
-            for s_data in pool["subs"]:
-                url = s_data["url"]
-                s_lang = "tr" if "tr" in url or "tur" in url else "en"
-                subs_map[str(sub_idx)] = {
-                    "type": "external",
-                    "lang": f"{s_lang} (Ext)",
-                    "url": url,
-                    "ext": "vtt" if "vtt" in url else "srt",
-                }
-                sub_idx += 1
+        for s_data in pool["subs"]:
+            url = s_data["url"]
+            s_lang = "tr" if "tr" in url or "tur" in url else "en"
+            subs_map[str(sub_idx)] = {
+                "type": "external",
+                "lang": f"{s_lang} (Ext)",
+                "url": url,
+                "ext": "vtt" if "vtt" in url else "srt",
+            }
+            sub_idx += 1
 
         selected_sub = None
         embed_mode = "none"
@@ -412,15 +411,7 @@ class VantaEngine:
         return user_name.strip()
 
     def create_pro_log(self, filename_base: str, fmt: Any, sub: Any, url: str) -> None:
-        """
-        Generates a JSON report in the universal download directory.
-        
-        Args:
-            filename_base (str): The filename chosen by user (no path).
-            fmt (Any): The format object.
-            sub (Any): The subtitle object.
-            url (str): Source URL.
-        """
+        """Generates a JSON report."""
         try:
             media_info = {}
             target_path = None
@@ -455,9 +446,7 @@ class VantaEngine:
             console.print(f"[red]{lang.get('report_failed', error=str(e))}[/]")
 
     def run(self) -> None:
-        """
-        Main execution loop for Manual/Sync Mode.
-        """
+        """Main execution loop for Manual/Sync Mode."""
         c_file: Optional[str] = None
         
         try:
@@ -484,7 +473,6 @@ class VantaEngine:
             console.print(f"\n[bold red]{lang.get('critical_error')}[/]\n{e}")
             traceback.print_exc()
         finally:
-            # SECURITY: Ensure cookie file is deleted even if crash occurs
             if c_file and Path(c_file).exists():
                 try:
                     Path(c_file).unlink()
