@@ -1,7 +1,9 @@
 import sys
 import logging
 import threading
-from typing import Dict, List, Any, Optional
+import time
+import json
+from typing import Dict, List, Any, Optional, Generator
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
@@ -45,16 +47,19 @@ class CapturedItem:
 class CaptureManager:
     """
     Thread-safe manager for handling captured media streams.
-    Replaces the unsafe global 'POOL' dictionary pattern.
+    Implements event-driven notifications to avoid CPU-intensive polling.
     """
     def __init__(self) -> None:
         self._videos: List[CapturedItem] = []
         self._subs: List[CapturedItem] = []
         self._lock: threading.Lock = threading.Lock()
+        # Event to notify waiters (Engine/SSE) that new data is available
+        self._event: threading.Event = threading.Event()
 
     def add_item(self, data: Dict[str, Any]) -> bool:
         """
         Adds a new item to the pool if it's not a duplicate.
+        Triggers the notification event if an item is added.
         
         Args:
             data (Dict[str, Any]): The raw JSON data from the request.
@@ -79,19 +84,35 @@ class CaptureManager:
             )
 
             with self._lock:
+                added = False
                 if item.type == "video":
                     if not any(v.url == item.url for v in self._videos):
                         self._videos.append(item)
-                        return True
+                        added = True
                 elif item.type == "sub":
                     if not any(s.url == item.url for s in self._subs):
                         self._subs.append(item)
-                        return True
+                        added = True
+                
+                if added:
+                    # Notify any waiting threads/generators
+                    self._event.set()
+                    return True
             return False
             
         except Exception as e:
             console.print(f"[red]Error adding captured item: {e}[/]")
             return False
+
+    def wait_for_item(self, timeout: Optional[float] = None) -> bool:
+        """
+        Blocks until a new item is added or timeout occurs.
+        Efficient alternative to polling.
+        """
+        flag = self._event.wait(timeout)
+        if flag:
+            self._event.clear()
+        return flag
 
     def get_status(self) -> Dict[str, int]:
         """Returns the current count of captured items safely."""
@@ -102,13 +123,16 @@ class CaptureManager:
             }
 
     def get_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Returns a snapshot of current data for the Engine to process."""
+        """
+        Returns a snapshot of current data for the Engine to process.
+        Returns a thread-safe deep copy (list of dicts), so no external locking is needed.
+        """
         with self._lock:
             return {
                 "videos": [v.to_dict() for v in self._videos],
-                "subs": [s.to_dict() for s in self._subs],
-                "lock": self._lock # Backwards compatibility for Engine if it expects a lock object
+                "subs": [s.to_dict() for s in self._subs]
             }
+
 
 # Singleton instance of the manager
 capture_manager = CaptureManager()
@@ -147,12 +171,43 @@ class VantaServer:
             html_content = render_html_page(lag)
             return render_template_string(html_content, script=script_content)
 
+        @self.app.route("/vantaether.user.js")
+        def install_script() -> Response:
+            """
+            Serves the script with the correct MIME type to trigger 
+            Tampermonkey/Violentmonkey installation dialog automatically.
+            """
+            script_content = get_tampermonkey_script()
+            return Response(script_content, mimetype="application/javascript")
+
         @self.app.route("/status")
         def status() -> Response:
-            """
-            Returns the current count of captured items.
-            """
+            """Returns the current count of captured items."""
             return jsonify(capture_manager.get_status())
+
+        @self.app.route("/stream")
+        def stream() -> Response:
+            """
+            Server-Sent Events (SSE) endpoint.
+            Push updates to the browser when new media is captured,
+            eliminating the need for polling from the frontend.
+            """
+            def event_stream() -> Generator[str, None, None]:
+                while True:
+                    # Wait for an event (max 20s to send keepalive)
+                    capture_manager.wait_for_item(timeout=20.0)
+                    
+                    # Send current status
+                    data = capture_manager.get_status()
+                    
+                    # Use json.dumps instead of jsonify to avoid application context errors
+                    json_str = json.dumps(data)
+                    yield f"data: {json_str}\n\n"
+                    
+                    # Small sleep to prevent tight loops if event isn't cleared fast enough
+                    time.sleep(0.1)
+
+            return Response(event_stream(), mimetype="text/event-stream")
 
         @self.app.route("/snipe", methods=["POST"])
         def snipe() -> tuple[Response, int]:
@@ -185,18 +240,8 @@ class VantaServer:
                 host="127.0.0.1",
                 port=self.port, 
                 debug=False, 
-                use_reloader=False
+                use_reloader=False,
+                threaded=True
             )
         except Exception as e:
             console.print(f"[red]{lag.get('flask_service_error', error=e)}[/]")
-
-
-def get_pool() -> Dict[str, Any]:
-    """
-    Accessor for the shared pool to maintain compatibility with legacy Engine code.
-    Ideally, the Engine should use 'capture_manager' directly in future refactors.
-    
-    Returns:
-        Dict[str, Any]: The global pool dictionary snapshot.
-    """
-    return capture_manager.get_snapshot()
