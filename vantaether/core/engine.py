@@ -36,6 +36,7 @@ class VantaEngine:
     """
 
     def __init__(self) -> None:
+        """Initialize the Engine, checking systems and setting up components."""
         clear_screen()
         console.print(Align.center(BANNER), style="bold magenta")
         self.analyzer = MediaAnalyzer()
@@ -50,6 +51,9 @@ class VantaEngine:
     def wait_for_target_interactive(self) -> Optional[Dict[str, Any]]:
         """
         Displays an interactive table of captured streams.
+        
+        Returns:
+            Optional[Dict[str, Any]]: The selected video target object.
         """
         console.print(
             Panel(
@@ -72,6 +76,7 @@ class VantaEngine:
 
         try:
             while True:
+                # Wait for at least one video to appear
                 with console.status(
                     f"[bold yellow]{lang.get('waiting_signal')}[/]",
                     spinner="earth",
@@ -140,7 +145,15 @@ class VantaEngine:
     def analyze_and_select(
         self, target: Dict[str, Any]
     ) -> Tuple[Any, Optional[str], Any, str, str, bool]:
-        """Analyzes target and prompts user for quality selection."""
+        """
+        Analyzes target and prompts user for quality selection.
+        
+        Args:
+            target: The target video dictionary containing URL and cookies.
+            
+        Returns:
+            Tuple: (format, audio_id, subtitle, embed_mode, cookie_path, force_mode)
+        """
         c_file = create_cookie_file(target["cookies"], target["url"])
 
         headers = {
@@ -186,9 +199,13 @@ class VantaEngine:
             ):
                 return None, None, None, "raw", c_file, True
             else:
+                # Recursively try again, but ensure we clean up the previous cookie file
                 if Path(c_file).exists():
                     Path(c_file).unlink()
-                return self.analyze_and_select(self.wait_for_target_interactive())
+                new_target = self.wait_for_target_interactive()
+                if new_target:
+                     return self.analyze_and_select(new_target)
+                return None, None, None, "raw", "", False # Exit case
 
         # Quality Selection
         formats = info.get("formats", [])
@@ -211,11 +228,9 @@ class VantaEngine:
         if unique_fmts:
             table = Table(title=lang.get("quality_options"), header_style="bold magenta")
             
-            # Using no_wrap=True for critical columns
             table.add_column("ID", justify="center", no_wrap=True)
             table.add_column(lang.get("resolution"), no_wrap=True)
             table.add_column("Bitrate", no_wrap=True)
-            # Codec with overflow protection
             table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
             table.add_column(lang.get("audio_status"), style="cyan")
 
@@ -225,7 +240,6 @@ class VantaEngine:
                     if f.get("acodec") != "none" and f.get("acodec") is not None
                     else lang.get("video_only")
                 )
-                # Extract codec
                 vcodec = f.get("vcodec", "unknown")
                 if vcodec == "none":
                     vcodec = "images"
@@ -290,7 +304,6 @@ class VantaEngine:
                     table = Table(title=lang.get("audio_sources"), header_style="bold yellow")
                     table.add_column("ID", justify="center", no_wrap=True)
                     table.add_column("Format ID", no_wrap=True)
-                    # Audio Codec with overflow protection
                     table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
                     table.add_column(lang.get("language") + " / Note")
                     table.add_column("Bitrate", no_wrap=True)
@@ -399,7 +412,6 @@ class VantaEngine:
             media_info = {}
             target_path = None
             
-            # Check for file existence in the correct directory
             possible_exts = [".mp4", ".mkv", ".webm"]
             for ext in possible_exts:
                 candidate = self.download_path / f"{filename_base}{ext}"
@@ -430,28 +442,39 @@ class VantaEngine:
             console.print(f"[red]{lang.get('report_failed', error=str(e))}[/]")
 
     def run(self) -> None:
-        """Main execution loop for Manual/Sync Mode."""
+        """
+        Main execution loop for Manual/Sync Mode.
+        """
+        c_file: Optional[str] = None
+        
         try:
             target = self.wait_for_target_interactive()
             if target:
                 fname = self.get_filename(target)
+                
                 fmt, audio_id, sub, mode, c_file, force = self.analyze_and_select(
                     target
                 )
+                
                 if fmt or force:
-                    # Pass the filename (not path) to downloader, it handles the path now
+                    # Pass the filename (not path) to downloader
                     self.downloader.download_stream(
                         target, fmt, audio_id, sub, mode, c_file, fname, force
                     )
                     
-                    if Confirm.ask("Create technical report?", default=False):
+                    if Confirm.ask(f"{lang.get('create_technical_report')}", default=False):
                         self.create_pro_log(fname, fmt, sub, target["url"])
                 else:
                     console.print(f"[bold red]{lang.get('download_error', error='Init failed')}[/]")
             
-            if c_file and Path(c_file).exists():
-                Path(c_file).unlink()
-
         except Exception as e:
             console.print(f"\n[bold red]{lang.get('critical_error')}[/]\n{e}")
             traceback.print_exc()
+        finally:
+            # SECURITY: Ensure cookie file is deleted even if crash occurs
+            if c_file and Path(c_file).exists():
+                try:
+                    Path(c_file).unlink()
+                    console.print(f"[dim]{lang.get(cookies_deleted)}[/]")
+                except OSError:
+                    pass

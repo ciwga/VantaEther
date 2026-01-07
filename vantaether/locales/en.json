@@ -134,5 +134,7 @@
     "menu_start_title": "STARTUP MODE SELECTION",
     "menu_option_url": "1. Target URL (Auto/Native)",
     "menu_option_sync": "2. Sync Mode (Browser Sniffing)",
-    "menu_choice": "Your Choice"
+    "menu_choice": "Your Choice",
+    "create_technical_report": "Create Technical Report?",
+    "cookies_deleted": "Sensitive cookies cleaned up."
 }

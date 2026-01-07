@@ -134,5 +134,7 @@
     "menu_start_title": "BAŞLANGIÇ MODU SEÇİMİ",
     "menu_option_url": "1. Hedef URL (Otomatik/Native)",
     "menu_option_sync": "2. Senkron Modu (Tarayıcı İzleme)",
-    "menu_choice": "Seçiminiz"
+    "menu_choice": "Seçiminiz",
+    "create_technical_report": "Teknik Rapor Oluşturulsun mu?",
+    "cookies_deleted": "Hassas çerezler temizlendi."
 }
