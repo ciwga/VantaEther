@@ -53,14 +53,13 @@ class CaptureManager:
         self._videos: List[CapturedItem] = []
         self._subs: List[CapturedItem] = []
         self._lock: threading.Lock = threading.Lock()
-        # Event to notify waiters (Engine/SSE) that new data is available
         self._event: threading.Event = threading.Event()
 
     def add_item(self, data: Dict[str, Any]) -> bool:
         """
         Adds a new item to the pool if it's not a duplicate.
         Triggers the notification event if an item is added.
-        
+
         Args:
             data (Dict[str, Any]): The raw JSON data from the request.
 
@@ -68,7 +67,6 @@ class CaptureManager:
             bool: True if added, False if duplicate or invalid.
         """
         try:
-            # Basic validation
             if "url" not in data or "type" not in data:
                 return False
 
@@ -95,7 +93,6 @@ class CaptureManager:
                         added = True
                 
                 if added:
-                    # Notify any waiting threads/generators
                     self._event.set()
                     return True
             return False
@@ -105,10 +102,7 @@ class CaptureManager:
             return False
 
     def wait_for_item(self, timeout: Optional[float] = None) -> bool:
-        """
-        Blocks until a new item is added or timeout occurs.
-        Efficient alternative to polling.
-        """
+        """Blocks until a new item is added or timeout occurs."""
         flag = self._event.wait(timeout)
         if flag:
             self._event.clear()
@@ -123,10 +117,7 @@ class CaptureManager:
             }
 
     def get_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Returns a snapshot of current data for the Engine to process.
-        Returns a thread-safe deep copy (list of dicts), so no external locking is needed.
-        """
+        """Returns a thread-safe snapshot of current data."""
         with self._lock:
             return {
                 "videos": [v.to_dict() for v in self._videos],
@@ -134,28 +125,25 @@ class CaptureManager:
             }
 
 
-# Singleton instance of the manager
-capture_manager = CaptureManager()
-
-
 class VantaServer:
     """
     Background Flask server to receive captured streams from the browser.
     
-    Security Note:
-        - Runs strictly on 127.0.0.1 to prevent external network access.
-        - CORS handling is implicit via the browser extension context.
+    Architecture Change:
+    Uses Dependency Injection for CaptureManager to ensure testability and isolation.
     """
 
-    def __init__(self, port: int = 5005) -> None:
+    def __init__(self, capture_manager: CaptureManager, port: int = 5005) -> None:
         """
         Initialize the VantaServer.
 
         Args:
+            capture_manager (CaptureManager): The injected dependency for state management.
             port (int): The port to run the server on. Defaults to 5005.
         """
         self.app = Flask(__name__)
         self.port = port
+        self.capture_manager = capture_manager
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -164,7 +152,7 @@ class VantaServer:
         @self.app.route("/")
         def index() -> str:
             """
-            Serves the main page with the Tampermonkey script code.
+            Serves the main page with the Tampermonkey/Violentmonkey script code.
             Renders localized HTML based on the system language.
             """
             script_content = get_tampermonkey_script()
@@ -183,7 +171,7 @@ class VantaServer:
         @self.app.route("/status")
         def status() -> Response:
             """Returns the current count of captured items."""
-            return jsonify(capture_manager.get_status())
+            return jsonify(self.capture_manager.get_status())
 
         @self.app.route("/stream")
         def stream() -> Response:
@@ -194,17 +182,10 @@ class VantaServer:
             """
             def event_stream() -> Generator[str, None, None]:
                 while True:
-                    # Wait for an event (max 20s to send keepalive)
-                    capture_manager.wait_for_item(timeout=20.0)
-                    
-                    # Send current status
-                    data = capture_manager.get_status()
-                    
-                    # Use json.dumps instead of jsonify to avoid application context errors
+                    self.capture_manager.wait_for_item(timeout=20.0)
+                    data = self.capture_manager.get_status()
                     json_str = json.dumps(data)
                     yield f"data: {json_str}\n\n"
-                    
-                    # Small sleep to prevent tight loops if event isn't cleared fast enough
                     time.sleep(0.1)
 
             return Response(event_stream(), mimetype="text/event-stream")
@@ -212,13 +193,13 @@ class VantaServer:
         @self.app.route("/snipe", methods=["POST"])
         def snipe() -> tuple[Response, int]:
             """
-            Endpoint for Tampermonkey to POST captured data.
+            Endpoint for Tampermonkey/Violentmonkey to POST captured data.
             """
             data = request.json
             if not data:
                 return jsonify({"status": "error", "msg": "No data"}), 400
 
-            added = capture_manager.add_item(data)
+            added = self.capture_manager.add_item(data)
             
             if added:
                 return jsonify({"status": "received"}), 200
@@ -226,14 +207,10 @@ class VantaServer:
                 return jsonify({"status": "duplicate_or_invalid"}), 200
 
     def run(self) -> None:
-        """
-        Starts the Flask server quietly.
-        """
+        """Starts the Flask server quietly."""
         try:
-            # Suppress the default Flask banner
             cli = sys.modules.get("flask.cli")
             if cli:
-                # Type ignore is used because we are monkey-patching a library function
                 cli.show_server_banner = lambda *x: None # type: ignore
             
             self.app.run(

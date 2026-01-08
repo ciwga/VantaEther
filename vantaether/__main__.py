@@ -10,8 +10,8 @@ from yt_dlp.extractor import gen_extractors
 
 from vantaether.config import BANNER
 from vantaether.core.engine import VantaEngine
-from vantaether.core.downloader import Downloader
 from vantaether.utils.i18n import LanguageManager
+from vantaether.core.downloader import DownloadManager
 from vantaether.utils.ui import render_banner, show_startup_sequence
 
 # Suppress SSL Warnings to ensure clean output
@@ -151,7 +151,7 @@ def main() -> None:
             expand=False
         ))
         try:
-            downloader = Downloader()
+            downloader = DownloadManager()
             downloader.native_download(url, audio_only=args.audio)
         except Exception as e:
             console.print(f"[bold red]{lang.get('native_mode_error', error=e)}[/]")

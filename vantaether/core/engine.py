@@ -1,13 +1,9 @@
-import re
-import os
+import threading
 import sys
 import time
-import json
-import threading
 import traceback
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 
 import yt_dlp
 from rich.console import Console
@@ -18,10 +14,13 @@ from rich.align import Align
 
 from vantaether.config import BANNER
 from vantaether.utils.i18n import LanguageManager
-from vantaether.core.downloader import Downloader
 from vantaether.core.analyzer import MediaAnalyzer
+from vantaether.core.selector import FormatSelector
+from vantaether.utils.file_manager import FileManager
+from vantaether.core.downloader import DownloadManager
 from vantaether.utils.cookies import create_cookie_file
-from vantaether.server.app import VantaServer, capture_manager
+from vantaether.server.app import VantaServer, CaptureManager
+from vantaether.utils.report_generator import ReportGenerator
 from vantaether.utils.system import check_systems, clear_screen
 
 
@@ -36,25 +35,32 @@ class VantaEngine:
     """
 
     def __init__(self) -> None:
-        """Initialize the Engine, checking systems and setting up components."""
+        """
+        Initialize the Engine, checking systems and setting up components.
+        Establishes the Dependency Injection container behavior.
+        """
         clear_screen()
         console.print(Align.center(BANNER), style="bold magenta")
         self.analyzer = MediaAnalyzer()
+        
         try:
             check_systems()
         except Exception:
             console.print(Panel(lang.get("ffmpeg_not_found"), style="bold red"))
 
-        self.downloader = Downloader()
-        self.download_path = self.downloader.download_path
-        
+        self.download_manager = DownloadManager()
+        self.file_manager = self.download_manager.file_manager
+        self.report_generator = self.download_manager.report_generator
+        self.selector = FormatSelector()
+        self.capture_manager = CaptureManager()
+
     def wait_for_target_interactive(self) -> Optional[Dict[str, Any]]:
         """
         Displays an interactive table of captured streams.
-        Uses threading.Event to wait efficiently instead of busy-waiting.
+        Starts the Server in a daemon thread, injecting the CaptureManager.
         
         Returns:
-            Optional[Dict[str, Any]]: The selected video target object.
+            Optional[Dict[str, Any]]: The selected video target object or None.
         """
         console.print(
             Panel(
@@ -68,7 +74,8 @@ class VantaEngine:
             )
         )
 
-        server = VantaServer()
+        # Inject capture_manager into the server explicitly
+        server = VantaServer(capture_manager=self.capture_manager)
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
 
@@ -76,37 +83,33 @@ class VantaEngine:
 
         try:
             while True:
-                # Optimized waiting loop
+                # Optimized waiting loop using threading.Event in CaptureManager
                 with console.status(
                     f"[bold yellow]{lang.get('waiting_signal')}[/]",
                     spinner="earth",
                 ):
                     while True:
-                        # Check current state first
-                        current_status = capture_manager.get_status()
+                        current_status = self.capture_manager.get_status()
                         if current_status["video_count"] > 0:
                             break
-                        
-                        # Wait for event notification instead of sleep loop
-                        capture_manager.wait_for_item(timeout=1.0)
+                        # Efficient blocking wait
+                        self.capture_manager.wait_for_item(timeout=1.0)
 
                 clear_screen()
                 console.print(Align.center(BANNER), style="bold magenta")
 
                 table = Table(title=lang.get("captured_streams_title"), show_lines=True)
-                table.add_column("ID", style="cyan", justify="center")
+                table.add_column(lang.get("table_id"), style="cyan", justify="center")
                 table.add_column(lang.get("source_type"), style="magenta")
                 table.add_column(lang.get("url_short"), style="green")
 
-                current_videos = []
-                
-                # Fetch fresh snapshot directly from capture_manager
-                display_pool = capture_manager.get_snapshot()
+                # Get thread-safe snapshot
+                display_pool = self.capture_manager.get_snapshot()
                 current_videos = list(display_pool["videos"])
 
                 for idx, vid in enumerate(current_videos, 1):
                     u = vid["url"]
-                    source = vid.get("source", "Unknown")
+                    source = vid.get("source", lang.get("unknown"))
 
                     ftype = source
                     if "master" in u:
@@ -151,7 +154,7 @@ class VantaEngine:
         self, target: Dict[str, Any]
     ) -> Tuple[Any, Optional[str], Any, str, str, bool]:
         """
-        Analyzes target and prompts user for quality selection.
+        Analyzes target using yt-dlp and prompts user for quality, audio, and subtitle selection.
 
         Args:
             target: The target video dictionary containing URL and cookies.
@@ -159,7 +162,8 @@ class VantaEngine:
         Returns:
             Tuple: (format, audio_id, subtitle, embed_mode, cookie_path, force_mode)
         """
-        c_file = create_cookie_file(target["cookies"], target["url"])
+        # Create a temporary Netscape cookie file for yt-dlp authentication
+        c_file = create_cookie_file(target.get("cookies", ""), target["url"])
 
         headers = {
             "User-Agent": target.get("agent", "Mozilla/5.0"),
@@ -207,65 +211,22 @@ class VantaEngine:
                 if Path(c_file).exists():
                     try:
                         Path(c_file).unlink()
-                    except OSError: pass
+                    except OSError:
+                        pass
                 
+                # Retry logic: Go back to list
                 new_target = self.wait_for_target_interactive()
                 if new_target:
                      return self.analyze_and_select(new_target)
                 return None, None, None, "raw", "", False 
 
-        # Quality Selection
+        # --- Quality Selection ---
         formats = info.get("formats", [])
-        video_formats = sorted(
-            [f for f in formats if f.get("height")],
-            key=lambda x: x.get("height", 0),
-            reverse=True,
-        )
+        
+        # Use the centralized FormatSelector instead of manual table logic
+        selected_fmt = self.selector.select_video_format(formats)
 
-        unique_fmts = []
-        seen = set()
-        for f in video_formats:
-            res = f"{f.get('height')}p"
-            if res not in seen:
-                unique_fmts.append(f)
-                seen.add(res)
-
-        selected_fmt = None
-
-        if unique_fmts:
-            table = Table(title=lang.get("quality_options"), header_style="bold magenta")
-            
-            table.add_column("ID", justify="center", no_wrap=True)
-            table.add_column(lang.get("resolution"), no_wrap=True)
-            table.add_column("Bitrate", no_wrap=True)
-            table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
-            table.add_column(lang.get("audio_status"), style="cyan")
-
-            for idx, f in enumerate(unique_fmts, 1):
-                audio_status = (
-                    lang.get("exists")
-                    if f.get("acodec") != "none" and f.get("acodec") is not None
-                    else lang.get("video_only")
-                )
-                vcodec = f.get("vcodec", "unknown")
-                if vcodec == "none":
-                    vcodec = "images"
-
-                table.add_row(
-                    str(idx),
-                    f"{f.get('height')}p",
-                    f"{int(f.get('tbr', 0) or 0)}k",
-                    vcodec,
-                    audio_status,
-                )
-            console.print(table)
-            choice = Prompt.ask(
-                lang.get("choice"),
-                choices=[str(i) for i in range(1, len(unique_fmts) + 1)],
-                default="1",
-            )
-            selected_fmt = unique_fmts[int(choice) - 1]
-        else:
+        if not selected_fmt:
             console.print(
                 Panel(
                     f"[yellow]{lang.get('auto_quality')}[/]", border_style="yellow"
@@ -273,78 +234,36 @@ class VantaEngine:
             )
             force_mode = True
 
-        # Audio Selection
+        # --- Audio Selection ---
         selected_audio_id = None
-        selected_is_silent = False
-
+        
         if selected_fmt:
             acodec = selected_fmt.get("acodec")
-            selected_is_silent = acodec is None or acodec == "none"
-
-        # STRICT FILTERING for Audio Formats
-        # Only accept formats with NO video codec OR explicitly NO height/width
-        audio_formats = [
-            f for f in formats
-            if (
-                (f.get("vcodec") == "none" or f.get("vcodec") is None) 
-                and f.get("height") is None 
-                and f.get("width") is None
+            needs_audio = acodec is None or acodec == "none"
+            
+            has_audio_options = any(
+                f.get("vcodec") == "none" and f.get("acodec") != "none" 
+                for f in formats
             )
-            and f.get("acodec") != "none"
-        ]
 
-        if len(audio_formats) > 0:
-            should_show_table = False
-            if selected_is_silent:
-                should_show_table = True
-            elif len(audio_formats) > 1:
-                should_show_table = Confirm.ask(
-                    f"[cyan]{lang.get('select_audio')}[/]",
-                    default=False,
-                )
+            should_prompt = False
+            if needs_audio and has_audio_options:
+                should_prompt = True
+            elif has_audio_options:
+                # If video has audio but user might want to override
+                if Confirm.ask(f"[cyan]{lang.get('select_audio')}[/]", default=False):
+                    should_prompt = True
+            
+            if should_prompt:
+                audio_fmt = self.selector.select_audio_format(formats)
+                if audio_fmt:
+                    selected_audio_id = audio_fmt["format_id"]
 
-            if should_show_table:
-                unique_audios = []
-                seen_audio = set()
-                for af in audio_formats:
-                    aud_id = af.get("format_id")
-                    if aud_id not in seen_audio:
-                        unique_audios.append(af)
-                        seen_audio.add(aud_id)
-
-                if unique_audios:
-                    table = Table(title=lang.get("audio_sources"), header_style="bold yellow")
-                    table.add_column("ID", justify="center", no_wrap=True)
-                    table.add_column("Format ID", no_wrap=True)
-                    table.add_column(lang.get("codec"), no_wrap=True, overflow="ellipsis", max_width=10)
-                    table.add_column(lang.get("language") + " / Note")
-                    table.add_column("Bitrate", no_wrap=True)
-
-                    for idx, af in enumerate(unique_audios, 1):
-                        curr_lang = (
-                            af.get("language") or af.get("format_note") or "Unknown"
-                        )
-                        tbr = f"{int(af.get('tbr', 0) or 0)}k"
-                        acodec = af.get("acodec", "unknown")
-                        table.add_row(
-                            str(idx), 
-                            af["format_id"], 
-                            acodec,
-                            curr_lang, 
-                            tbr
-                        )
-
-                    console.print(table)
-                    choice = Prompt.ask(
-                        lang.get("audio_choice"),
-                        choices=[str(i) for i in range(1, len(unique_audios) + 1)],
-                        default="1",
-                    )
-                    selected_audio_id = unique_audios[int(choice) - 1]["format_id"]
-
-        # Subtitle Selection
+        # --- Subtitle Selection ---
         subs_map = {}
         sub_idx = 1
+        
+        # 1. Internal Subtitles (from yt-dlp info)
         if "subtitles" in info and info["subtitles"]:
             for curr_lang, sub_list in info["subtitles"].items():
                 for s in sub_list:
@@ -356,7 +275,8 @@ class VantaEngine:
                     }
                     sub_idx += 1
 
-        pool = capture_manager.get_snapshot()
+        # 2. External Subtitles (Captured via Browser)
+        pool = self.capture_manager.get_snapshot()
         
         for s_data in pool["subs"]:
             url = s_data["url"]
@@ -374,15 +294,16 @@ class VantaEngine:
 
         if subs_map:
             table = Table(title=lang.get("subtitles_title"), header_style="bold cyan")
-            table.add_column("ID")
+            table.add_column(lang.get("table_id"), justify="center")
             table.add_column(lang.get("language"))
-            table.add_column("Type")
+            table.add_column(lang.get("type"))
+            
             for k, v in subs_map.items():
                 table.add_row(k, v["lang"], v["ext"])
             console.print(table)
 
             if Confirm.ask(lang.get("download_subs"), default=True):
-                s_choice = Prompt.ask("Selection", choices=list(subs_map.keys()))
+                s_choice = Prompt.ask(lang.get("choice"), choices=list(subs_map.keys()))
                 selected_sub = subs_map[s_choice]
 
                 console.print(lang.get("embed_mode_prompt"))
@@ -396,76 +317,34 @@ class VantaEngine:
 
         return selected_fmt, selected_audio_id, selected_sub, embed_mode, c_file, force_mode
 
-    def get_filename(self, target: Dict[str, Any]) -> str:
-        """Determines the output filename (without path)."""
-        default_name = re.sub(
-            r'[<>:"/\\|?*]', "", target.get("title", "video")
-        ).strip()[:50]
-        if not default_name or default_name == "cyber_media":
-            default_name = "video_download"
-
-        console.print(f"\n[dim]{lang.get('filename_detected', name=default_name)}[/]")
-        user_name = Prompt.ask(
-            lang.get("filename_prompt"), default=default_name
-        )
-        return user_name.strip()
-
-    def create_pro_log(self, filename_base: str, fmt: Any, sub: Any, url: str) -> None:
-        """Generates a JSON report."""
-        try:
-            media_info = {}
-            target_path = None
-            
-            possible_exts = [".mp4", ".mkv", ".webm"]
-            for ext in possible_exts:
-                candidate = self.download_path / f"{filename_base}{ext}"
-                if candidate.exists():
-                    target_path = candidate
-                    break
-            
-            if target_path and self.analyzer:
-                media_info = self.analyzer.get_media_info(str(target_path))
-
-            log_data = {
-                "timestamp": str(datetime.now()),
-                "source": url,
-                "storage_path": str(self.download_path),
-                "media_info": media_info,
-                "options": {
-                    "quality": fmt.get("format_id") if fmt else "Raw",
-                    "subtitle": sub,
-                },
-            }
-            
-            report_file = self.download_path / f"{filename_base}_REPORT.json"
-            
-            with open(report_file, "w", encoding="utf-8") as f:
-                json.dump(log_data, f, indent=4)
-            console.print(f"[green]{lang.get('report_created', path=str(report_file))}[/]")
-        except Exception as e:
-            console.print(f"[red]{lang.get('report_failed', error=str(e))}[/]")
-
     def run(self) -> None:
-        """Main execution loop for Manual/Sync Mode."""
+        """
+        Main execution loop for Manual/Sync Mode.
+        Coordinates the entire flow from selection to download and reporting.
+        """
         c_file: Optional[str] = None
         
         try:
             target = self.wait_for_target_interactive()
             if target:
-                fname = self.get_filename(target)
+                fname = self.file_manager.get_user_filename(target.get("title", "video"))
                 
                 fmt, audio_id, sub, mode, c_file, force = self.analyze_and_select(
                     target
                 )
                 
                 if fmt or force:
-                    # Pass the filename (not path) to downloader
-                    self.downloader.download_stream(
+                    self.download_manager.download_stream(
                         target, fmt, audio_id, sub, mode, c_file, fname, force
                     )
                     
                     if Confirm.ask(f"{lang.get('create_technical_report')}", default=False):
-                        self.create_pro_log(fname, fmt, sub, target["url"])
+                        self.report_generator.create_report(
+                            fname, 
+                            target["url"], 
+                            format_info=fmt, 
+                            subtitle_info=sub
+                        )
                 else:
                     console.print(f"[bold red]{lang.get('download_error', error='Init failed')}[/]")
             
