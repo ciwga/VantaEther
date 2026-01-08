@@ -5,7 +5,7 @@ from vantaether.utils.i18n import LanguageManager
 lang = LanguageManager()
 
 
-VERSION: Final[str] = "1.0"
+VERSION: Final[str] = "2.0"
 
 BANNER: Final[str] = rf"""
 [bold white]██╗   ██╗ █████╗ ███╗   ██╗████████╗ █████╗[/]
