@@ -144,5 +144,13 @@
     "disclaimer_text": "This tool is designed for educational purposes and personal archiving ONLY.\nThe user is solely responsible for complying with the copyright laws and Terms of Service\nof the websites accessed. The author accepts NO responsibility for misuse.\n\nDo you accept these terms?",
     "disclaimer_accepted": "Terms accepted. Starting VantaEther...",
     "disclaimer_rejected": "Terms rejected. Exiting...",
-    "android_dir_error": "Android storage access error: {error}"
+    "android_dir_error": "Android storage access error: {error}",
+    "playlist_id_detected": "Playlist ID detected. Switching probe mode...",
+    "available_subs": "Available: {langs}",
+    "subs_count_detected": "{count} languages detected.",
+    "error_on_item": "Error on item {index}: {error}",
+    "table_format_id": "Format ID",
+    "table_note_suffix": " / Note",
+    "unknown": "Unknown",
+    "unknown_playlist": "Unknown Playlist"
 }

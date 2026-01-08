@@ -1,4 +1,4 @@
 """
 VantaEther Package Initialization.
 """
-__version__ = "1.0"
+__version__ = "2.0"
