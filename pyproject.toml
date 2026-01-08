@@ -43,4 +43,4 @@ include = ["vantaether*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"vantaether" = ["locales/*.json"]
+"vantaether" = ["locales/*.json", "assets/*.js"]
