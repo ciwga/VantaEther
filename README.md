@@ -1,6 +1,6 @@
 # VantaEther
 
-![Version](https://img.shields.io/badge/version-2.0-blue)
+![Version](https://img.shields.io/badge/version-2.1-blue)
 ![Python Version](https://img.shields.io/badge/python-3.8+-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -13,22 +13,25 @@ It features a modern TUI (Terminal User Interface) powered by `rich`, a modular 
 ## 🚀 Features
 
 * **Dual Mode Operation:**
-    * **Native Mode:** Direct high-speed downloads for platforms supported natively (e.g., YouTube, Twitch) using `yt-dlp` internals, now with improved playlist handling.
-    * **Sync Mode (Sniffer):** A local Flask server pairs with a custom UserScript to capture encrypted/protected streams (HLS/m3u8, MP4) directly from the browser.
+    * **Native Mode:** Direct high-speed downloads for platforms supported natively (e.g., YouTube, Twitch) using `yt-dlp` internals.
+    * **Sync Mode (Sniffer):** A local Flask server pairs with a custom UserScript to capture encrypted/protected streams (HLS/m3u8, MP4, API Endpoints) directly from the browser.
+
+* **Smart Network Management (NEW):**
+    * **Header Factory:** Implements automated header manipulation and spoofing (Referer/Origin) for strict platforms like Twitter/X.
+    * **Universal Domain Spraying:** intelligently analyzes cookies and sprays them across valid subdomains to minimize "403 Forbidden" errors on strict CDNs.
 
 * **Robust Browser Integration:**
-    * The v2.0 UserScript (for Tampermonkey/Violentmonkey) features a **connection manager with a request queue and exponential backoff**.
-    * If the VantaEther server is offline, captured links are safely queued in the browser. The script automatically detects when the server is back online and transmits the queue, **preventing any data loss**.
-
-* **Modular Architecture:**
-    * The core engine has been refactored into a service-oriented design (`DownloadManager`, `FileManager`, `PlaylistManager`, `FormatSelector`). This makes the system more maintainable, testable, and extensible.
+    * **Memory Protection:** The agent now includes auto-pruning to prevent browser memory leaks during long sniffing sessions.
+    * **Remote Logging:** Mirrors browser console logs (DEBUG) and DRM alerts directly to your terminal.
+    * **Offline Queue:** Captured links are safely queued if the server is offline and automatically transmitted once the connection is restored.
 
 * **Media Intelligence:**
-    * Integrated `ffprobe` analyzer to generate detailed technical JSON reports (Codec, Bitrate, FPS, Resolution) for every download via a dedicated `ReportGenerator` service.
+    * Integrated `ffprobe` analyzer generates detailed technical JSON reports (Codec, Bitrate, FPS, Resolution) for every download via the `ReportGenerator` service.
 
-* **Advanced Merging:**
+* **Advanced Merging & Compatibility:**
     * Seamlessly merges video, audio, and subtitle streams.
     * Handles external subtitle synchronization and embedding (MKV/MP4).
+    * **Android Support:** Enhanced directory resolution for Termux/Android environments.
 
 ---
 
@@ -73,21 +76,48 @@ It is recommended to use a virtual environment to maintain a clean workspace.
     ```
 4.  **Alternatively, install as a package:**
 
-    *  *Standard Installation:*
+    * *From source (Dev):*
         ```bash
         pip install .
         ```
-        **After installation, you can run the app globally using the command: ```vantaether```**
+    
+    * *Directly from GitHub (git+https):*
+        ```bash
+        pip install git+https://github.com/ciwga/VantaEther.git
+        ```
+
+    **After installation, you can run the app globally using the command: ```vantaether```**
 ---
 
 ## 🖥️ Usage
 
-You can run the application directly as a module.
-
-### 1. Native Mode (CLI)
-For supported sites (like YouTube playlists), you can pass the URL directly via the command line.
+You can run the application either as an installed command or directly from the source code.
 
 **⚠️ Important Tip:** Always enclose URLs in **double quotes** (`""`). This prevents your terminal shell from misinterpreting special characters like `&` as commands.
+
+### Option A: If Installed (Recommended)
+If you installed the package via `pip install .` or directly from GitHub, you can simply use the `vantaether` command from anywhere in your terminal:
+
+```bash
+# General Usage
+vantaether [URL] [OPTIONS]
+
+# Example: Download a video
+vantaether "https://www.youtube.com/watch?v=example"
+
+# Open the Interactive Menu
+vantaether
+```
+
+### Option B: Running from Source (Git Clone)
+If you only cloned the repository and installed dependencies (pip install -r requirements.txt) without installing the package, you must run it as a module.
+
+Note: Ensure you are in the root directory of the project (where pyproject.toml is located).
+```bash
+cd VantaEther
+```
+#### 1. Native Mode (CLI)
+For supported sites (like YouTube playlists), you can pass the URL directly via the command line.
 
 ```bash
 # Download a single video or a full playlist
