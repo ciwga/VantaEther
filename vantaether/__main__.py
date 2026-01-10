@@ -85,6 +85,12 @@ def main() -> None:
         help=lang.get("cli_help_audio")
     )
 
+    parser.add_argument(
+        "--console",
+        action="store_true",
+        help=lang.get("cli_help_console")
+    )
+
     args = parser.parse_args()
 
     # --- LEGAL CHECK ---
@@ -124,7 +130,7 @@ def main() -> None:
                 expand=False
             ))
             try:
-                engine = VantaEngine()
+                engine = VantaEngine(enable_console=args.console)
                 engine.run()
             except Exception as e:
                 console.print(f"[bold red]{lang.get('vanta_engine_error', error=e)}[/]")
@@ -164,7 +170,8 @@ def main() -> None:
             expand=False
         ))
         try:
-            engine = VantaEngine()
+            # Fallback mode: Pass console flag
+            engine = VantaEngine(enable_console=args.console)
             engine.run() 
         except Exception as e:
             console.print(f"[bold red]{lang.get('vanta_engine_error', error=e)}[/]")
