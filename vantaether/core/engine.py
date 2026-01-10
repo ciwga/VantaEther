@@ -20,6 +20,7 @@ from vantaether.core.selector import FormatSelector
 from vantaether.utils.file_manager import FileManager
 from vantaether.core.downloader import DownloadManager
 from vantaether.utils.cookies import create_cookie_file
+from vantaether.utils.header_factory import HeaderFactory
 from vantaether.server.app import VantaServer, CaptureManager
 from vantaether.utils.report_generator import ReportGenerator
 from vantaether.utils.system import check_systems, clear_screen
@@ -42,10 +43,6 @@ class VantaEngine:
         """
         Initialize the Engine, checking systems and setting up components.
         Establishes the Dependency Injection container behavior.
-
-        Args:
-            enable_console (bool): If True, browser logs are printed immediately.
-                                   If False, the user might be prompted later.
         """
         clear_screen()
         console.print(Align.center(BANNER), style="bold magenta")
@@ -68,13 +65,6 @@ class VantaEngine:
         """
         Displays an interactive table of captured streams and handles user input.
         Starts the Server in a daemon thread, injecting the CaptureManager.
-        
-        Features:
-        - Real-time logging from browser via Remote Log mechanism (Configurable).
-        - 'Clear' command to reset both UI and Server state.
-        
-        Returns:
-            Optional[Dict[str, Any]]: The selected video target object or None.
         """
         console.print(
             Panel(
@@ -104,13 +94,10 @@ class VantaEngine:
         seen_logs: Set[str] = set()
         SERVER_API_URL = "http://127.0.0.1:5005"
         
-        # Initialized to -1 to distinguish "start state" from "0 items found"
         last_item_count = -1
 
         try:
             while True:
-                # Polling Loop with Remote Log Detection
-                # Wait via event mechanism instead of rapid polling
                 with console.status(
                     f"[bold yellow]{lang.get('waiting_signal')}[/] [dim]({lang.get('listen_console') if self.enable_console else lang.get('silent_mode')})[/]",
                     spinner="earth",
@@ -118,18 +105,15 @@ class VantaEngine:
                     while True:
                         has_new_data = self.capture_manager.wait_for_item(timeout=1.0)
                         
-                        # Only fetch snapshot if there is new data or we are monitoring logs
                         if has_new_data or self.enable_console:
                             snapshot = self.capture_manager.get_snapshot()
                             raw_videos = snapshot.get("videos", [])
                             
-                            # Filter out logs and actual videos
                             real_videos = []
                             new_logs = []
                             
                             for v in raw_videos:
                                 if v.get("source") == "REMOTE_LOG":
-                                    # Only process/show logs if the feature is enabled
                                     if self.enable_console:
                                         msg_id = f"{v.get('title')}:{v.get('url')}"
                                         if msg_id not in seen_logs:
@@ -138,7 +122,6 @@ class VantaEngine:
                                 else:
                                     real_videos.append(v)
                             
-                            # Print new logs immediately (If enabled)
                             for log_item in new_logs:
                                 level = log_item.get("title", "INFO")
                                 msg = log_item.get("url", "").replace("LOG: ", "")
@@ -153,7 +136,6 @@ class VantaEngine:
                                     style = "bold green"
                                     prefix = lang.get("capture_prefix")
                                 
-                                # Print above the status bar
                                 console.print(f"{prefix} {msg}", style=style)
 
                             current_count = len(real_videos)
@@ -168,14 +150,11 @@ class VantaEngine:
                 table.add_column(lang.get("source_type"), style="magenta")
                 table.add_column(lang.get("url_short"), style="green")
 
-                # Re-fetch and filter for display
                 display_pool = self.capture_manager.get_snapshot()
                 all_items = display_pool["videos"]
                 
-                # Filter out logs for the selection table (always hide logs from table)
                 valid_videos = [v for v in all_items if v.get("source") != "REMOTE_LOG"]
                 
-                # Update tracking var
                 last_item_count = len(valid_videos)
 
                 for idx, vid in enumerate(valid_videos, 1):
@@ -185,10 +164,10 @@ class VantaEngine:
                     t_type = vid.get("media_type", "")
 
                     ftype = source
-                    if "manifest" in t_type or "m3u8" in u:
-                        ftype += lang.get("stream_suffix")
-                    elif "master" in u:
+                    if "master" in u:
                         ftype += f" [bold yellow]{lang.get('master_suffix')}[/]"
+                    elif "manifest" in t_type or "m3u8" in u:
+                        ftype += lang.get("stream_suffix")
                     elif "api" in t_type or "embed" in u:
                         ftype += f" [bold yellow]{lang.get('api_embed_suffix')}[/]"
                     elif "mp4" in u:
@@ -214,12 +193,11 @@ class VantaEngine:
                     last_item_count = -1
                     continue
                 
-                # Handle Clear Command
                 if choice.lower() == "c":
                     try:
                         requests.post(f"{SERVER_API_URL}/clear", timeout=2)
-                        seen_logs.clear() # Clear local log memory
-                        last_item_count = -1 # Reset counter to force UI update
+                        seen_logs.clear()
+                        last_item_count = -1
                         console.print(f"[green]{lang.get('list_cleared_success')}[/]")
                         time.sleep(1)
                     except Exception as e:
@@ -246,31 +224,23 @@ class VantaEngine:
         self, target: Dict[str, Any]
     ) -> Tuple[Any, Optional[str], Any, str, str, bool]:
         """
-        Analyzes target using yt-dlp and prompts user for quality, audio, and subtitle selection.
-
-        Args:
-            target: The target video dictionary containing URL and cookies.
-            
+        Analyzes target using yt-dlp and prompts user for quality.
+        
         Returns:
             Tuple: (format, audio_id, subtitle, embed_mode, cookie_path, force_mode)
         """
-        # Create a temporary Netscape cookie file for yt-dlp authentication
-        c_file = create_cookie_file(target.get("cookies", ""), target["url"])
+        c_file = create_cookie_file(
+            target.get("cookies", ""), 
+            target["url"],
+            ref_url=target.get("page")
+        )
 
-        headers = {
-            "User-Agent": target.get("agent", "Mozilla/5.0"),
-            "Referer": target.get("page", target["url"]),
-            "Origin": "/".join(target.get("page", "").split("/")[:3]),
-            "Accept": "*/*",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
-            "X-Requested-With": "XMLHttpRequest",
-        }
+        # Use centralized factory for consistency
+        headers = HeaderFactory.get_headers(
+            target_url=target["url"],
+            page_url=target.get("page", target["url"]),
+            user_agent=target.get("agent", "Mozilla/5.0")
+        )
 
         console.print(f"\n[magenta]{lang.get('analyzing')}[/]")
 
@@ -282,7 +252,6 @@ class VantaEngine:
             "cookiefile": c_file,
             "listsubtitles": True,
             "socket_timeout": 30,
-            # Allow downloading unplayable formats (DRM) to avoid errors during analysis
             "allow_unplayable_formats": True, 
             "logger": None,
         }
@@ -295,26 +264,22 @@ class VantaEngine:
                 info = ydl.extract_info(target["url"], download=False)
         except Exception as e:
             console.print(f"[bold red]{lang.get('analysis_failed')}[/]\n[dim]{str(e)[:150]}...[/]")
+            
             if Confirm.ask(
                 f"[bold yellow]{lang.get('try_raw')}[/]",
                 default=True,
             ):
                 return None, None, None, "raw", c_file, True
             else:
-                if Path(c_file).exists():
+                # Cleanup and signal cancellation
+                if c_file and Path(c_file).exists():
                     try:
                         Path(c_file).unlink()
                     except OSError:
                         pass
                 
-                # Retry logic: Go back to list
-                new_target = self.wait_for_target_interactive()
-                if new_target:
-                     return self.analyze_and_select(new_target)
-                return None, None, None, "raw", "", False 
+                return None, None, None, "cancel", "", False 
 
-        # --- API/Embed Warning for Audio ---
-        # If captured via API sniffing, audio streams might not be visible in initial analysis.
         if target.get("media_type") in ["stream_api", "embed"] or "embed" in target["url"]:
              console.print(
                  Panel(
@@ -324,10 +289,7 @@ class VantaEngine:
                  )
              )
 
-        # --- Quality Selection ---
         formats = info.get("formats", [])
-        
-        # Use the centralized FormatSelector instead of manual table logic
         selected_fmt = self.selector.select_video_format(formats)
 
         if not selected_fmt:
@@ -338,9 +300,7 @@ class VantaEngine:
             )
             force_mode = True
 
-        # --- Audio Selection ---
         selected_audio_id = None
-        
         if selected_fmt:
             acodec = selected_fmt.get("acodec")
             needs_audio = acodec is None or acodec == "none"
@@ -354,7 +314,6 @@ class VantaEngine:
             if needs_audio and has_audio_options:
                 should_prompt = True
             elif has_audio_options:
-                # If video has audio but user might want to override
                 if Confirm.ask(f"[cyan]{lang.get('select_audio')}[/]", default=False):
                     should_prompt = True
             
@@ -363,11 +322,9 @@ class VantaEngine:
                 if audio_fmt:
                     selected_audio_id = audio_fmt["format_id"]
 
-        # --- Subtitle Selection ---
         subs_map = {}
         sub_idx = 1
         
-        # 1. Internal Subtitles (from yt-dlp info)
         if "subtitles" in info and info["subtitles"]:
             for curr_lang, sub_list in info["subtitles"].items():
                 for s in sub_list:
@@ -379,9 +336,7 @@ class VantaEngine:
                     }
                     sub_idx += 1
 
-        # 2. External Subtitles (Captured via Browser)
         pool = self.capture_manager.get_snapshot()
-        
         for s_data in pool["subs"]:
             url = s_data["url"]
             s_lang = "tr" if "tr" in url or "tur" in url else "en"
@@ -424,31 +379,35 @@ class VantaEngine:
     def run(self) -> None:
         """
         Main execution loop for Manual/Sync Mode.
-        Coordinates the entire flow from selection to download and reporting.
         """
         c_file: Optional[str] = None
         
         try:
             target = self.wait_for_target_interactive()
             if target:
-                fname = self.file_manager.get_user_filename(target.get("title", "video"))
+                fname = self.file_manager.get_user_filename(target.get("title", lang.get("default_filename_base")))
                 
                 fmt, audio_id, sub, mode, c_file, force = self.analyze_and_select(
                     target
                 )
                 
+                if mode == "cancel":
+                    console.print(f"[yellow]{lang.get('cancelled')}[/]")
+                    return
+
                 if fmt or force:
-                    self.download_manager.download_stream(
+                    success = self.download_manager.download_stream(
                         target, fmt, audio_id, sub, mode, c_file, fname, force
                     )
                     
-                    if Confirm.ask(f"{lang.get('create_technical_report')}", default=False):
-                        self.report_generator.create_report(
-                            fname, 
-                            target["url"], 
-                            format_info=fmt, 
-                            subtitle_info=sub
-                        )
+                    if success:
+                         if Confirm.ask(f"{lang.get('create_technical_report')}", default=True):
+                            self.report_generator.create_report(
+                                fname, 
+                                target["url"], 
+                                format_info=fmt, 
+                                subtitle_info=sub
+                            )
                 else:
                     console.print(f"[bold red]{lang.get('download_error', error=lang.get('init_failed'))}[/]")
             

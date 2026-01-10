@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import yt_dlp
+from yt_dlp.utils import DownloadError
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Union
 from urllib.parse import urlparse, parse_qs
@@ -25,6 +26,7 @@ from vantaether.core.playlist import PlaylistManager
 from vantaether.utils.i18n import LanguageManager
 from vantaether.utils.file_manager import FileManager
 from vantaether.utils.report_generator import ReportGenerator
+from vantaether.utils.header_factory import HeaderFactory 
 from vantaether.utils.ui import (
     RichLogger,
     NativeYtDlpEtaColumn,
@@ -64,9 +66,6 @@ class DownloadManager:
         """
         Callback hook for yt-dlp progress updates.
         Captures native 'eta' and 'speed' from yt-dlp and passes them to the UI.
-        
-        Args:
-            d (Dict[str, Any]): The progress dictionary provided by yt-dlp.
         """
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -90,11 +89,6 @@ class DownloadManager:
     ) -> None:
         """
         Analyzes and downloads a single video with interactive format selection.
-
-        Args:
-            url (str): The video URL.
-            force_best (bool): If True, skips prompts and selects best quality.
-            audio_only (bool): If True, downloads only audio (converts to mp3).
         """
         console.print(f"[cyan]{lang.get('analyzing')}[/]")
 
@@ -110,7 +104,7 @@ class DownloadManager:
             console.print(f"[bold red]{lang.get('analysis_failed')}[/]")
             return
 
-        title = info.get("title", "video")
+        title = info.get("title", lang.get("default_filename_base"))
         if force_best or audio_only:
             filename = self.file_manager.sanitize_filename(title)
             console.print(f"[dim]{lang.get('filename_detected', name=filename)}[/]")
@@ -155,18 +149,14 @@ class DownloadManager:
                 v_id = selected_fmt["format_id"]
                 selected_audio_id = "bestaudio"
                 
-                # Check for available audio streams in the full format list
                 all_formats = info.get("formats", [])
-                
-                # Heuristic: does the selected video need audio?
                 needs_audio = selected_fmt.get("acodec") == "none"
 
-                # If user manually picked a video, ask about audio if multiple options exist
                 if Confirm.ask(f"[cyan]{lang.get('select_audio')}[/]", default=False):
                     audio_fmt = self.selector.select_audio_format(all_formats)
                     if audio_fmt:
                         selected_audio_id = audio_fmt["format_id"]
-                        needs_audio = True # Force merge logic if user picked one
+                        needs_audio = True
 
                 selected_format_id = f"{v_id}+{selected_audio_id}"
             else:
@@ -216,10 +206,6 @@ class DownloadManager:
     def native_download(self, url: str, audio_only: bool = False) -> None:
         """
         Entry point for native downloads. Handles Playlists vs Single Videos.
-
-        Args:
-            url (str): The target URL.
-            audio_only (bool): If True, downloads only audio.
         """
         console.print(
             Panel(
@@ -271,14 +257,11 @@ class DownloadManager:
             if not selected_entries:
                 return
 
-            # Detect YouTube context for URL reconstruction
             is_youtube = "youtube" in info.get("extractor_key", "").lower()
 
             for idx, entry in enumerate(selected_entries, 1):
                 if entry:
                     video_url = entry.get("url") or entry.get("webpage_url")
-                    
-                    # Youtube URL Reconstruction Heuristic
                     if not video_url and entry.get("id") and is_youtube:
                         video_url = f"https://www.youtube.com/watch?v={entry.get('id')}"
 
@@ -294,9 +277,7 @@ class DownloadManager:
                             )
                         except Exception as e:
                             console.print(f"[red]{lang.get('error_on_item', index=idx, error=e)}[/]")
-
         else:
-            # Single Video
             self._process_single_native_video(
                 url, force_best=False, audio_only=audio_only
             )
@@ -311,24 +292,18 @@ class DownloadManager:
         c_file: str,
         filename: str,
         force_mode: bool = False,
-    ) -> None:
+    ) -> bool:
         """
         Executes the download for a manually selected stream (Sync Mode).
+        Uses HeaderFactory to generate appropriate headers.
         """
         console.print(f"[bold blue]{lang.get('download_location')}[/] [dim]{self.download_path}[/]")
 
-        http_headers = {
-            "User-Agent": target.get("agent", "Mozilla/5.0"),
-            "Referer": target.get("page", target["url"]),
-            "Origin": "/".join(target.get("page", "").split("/")[:3]),
-            "Accept": "*/*",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-            "X-Requested-With": "XMLHttpRequest",
-        }
+        http_headers = HeaderFactory.get_headers(
+            target_url=target["url"],
+            page_url=target.get("page", target["url"]),
+            user_agent=target.get("agent", "Mozilla/5.0")
+        )
 
         base_output = self.download_path / filename
 
@@ -344,7 +319,7 @@ class DownloadManager:
             "socket_timeout": 30,
             "retries": 20,
             "allow_unplayable_formats": True,
-            "ignoreerrors": True,
+            "ignoreerrors": False,
             "postprocessor_args": {
                 "ffmpeg": ["-fflags", "+genpts", "-avoid_negative_ts", "make_zero"]
             },
@@ -364,7 +339,8 @@ class DownloadManager:
             opts_video["outtmpl"] = f"{base_output}.%(ext)s"
             opts_video["ignoreerrors"] = False
 
-            self._start_download(opts_video, target["url"], f"{filename} [Video]")
+            video_fname = f"{filename}{lang.get('suffix_video')}"
+            v_success = self._start_download(opts_video, target["url"], video_fname)
 
             console.print(f"[cyan]{lang.get('processing_audio', format_id=audio_id)}[/]")
             opts_audio = ydl_opts.copy()
@@ -374,7 +350,9 @@ class DownloadManager:
             opts_audio["concurrent_fragment_downloads"] = 1
             opts_audio["ignoreerrors"] = False
 
-            success = self._start_download(opts_audio, target["url"], f"{filename} [Audio]")
+            audio_fname = f"{filename}{lang.get('suffix_audio')}"
+            a_success = self._start_download(opts_audio, target["url"], audio_fname)
+            success = v_success and a_success
         else:
             if force_mode:
                 ydl_opts["format"] = "bestvideo+bestaudio/best"
@@ -391,7 +369,7 @@ class DownloadManager:
             success = self._start_download(ydl_opts, target["url"], filename)
 
         if not success:
-            return
+            return False
 
         # Check resulting files
         found_file, actual_ext, orphan_audio_file = self.file_manager.detect_files(filename)
@@ -417,13 +395,15 @@ class DownloadManager:
                     actual_ext,
                     str(orphan_audio_file) if orphan_audio_file else None,
                 )
+            return True
         else:
             console.print(f"[bold red]{lang.get('video_not_found')}[/]")
+            return False
 
     def _start_download(self, opts: Dict[str, Any], url: str, filename: str) -> bool:
         """
         Wrapper to invoke yt-dlp with rich progress bar.
-        Uses custom NativeYtDlpEtaColumn and NativeYtDlpSpeedColumn for accuracy.
+        Handles specific exceptions like 403 and DRM using localized strings.
         """
         console.print("\n")
         console.rule(lang.get("download_starting", filename=filename))
@@ -450,13 +430,26 @@ class DownloadManager:
         try:
             with self.current_progress:
                 self.dl_task = self.current_progress.add_task(
-                    "dl", filename=filename, total=None
+                    lang.get("task_download_key"), filename=filename, total=None
                 )
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
 
             console.print(Panel(lang.get("download_success"), border_style="green"))
             return True
+            
+        except DownloadError as e:
+            err_msg = str(e)
+            
+            if "403" in err_msg:
+                console.print(f"[bold red]{lang.get('download_error_403')}[/]")
+            elif "DRM" in err_msg or "copyright" in err_msg.lower():
+                console.print(f"[bold red]{lang.get('download_error_drm')}[/]")
+            else:
+                console.print(f"[red]{lang.get('download_error', error=err_msg)}[/]")
+            
+            return False
+            
         except Exception as e:
             console.print(f"[red]{lang.get('download_error', error=str(e))}[/]")
             return False
