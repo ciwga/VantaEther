@@ -6,6 +6,7 @@
     "language": "Dil",
     "choice": "Seçim",
     "options": "Seçenekler:",
+    "cancelled": "İptal Edildi",
 
     "system_starting": "SİSTEM BAŞLATILIYOR...",
     "ready_status": "✔ SİSTEM HAZIR",
@@ -25,6 +26,8 @@
     "cookie_file_error": "Cookie dosyası oluşturulamadı: {error}",
     "cookies_deleted": "Hassas çerezler temizlendi.",
     "script_not_found": "// Hata: Script dosyası bulunamadı.",
+    "default_filename_base": "video",
+    "task_download_key": "indiriliyor",
 
     "menu_start_title": "BAŞLANGIÇ MODU SEÇİMİ",
     "menu_option_url": "1. Hedef URL (Otomatik/Native)",
@@ -69,6 +72,8 @@
     "master_suffix": " (ANA LİSTE)",
     "api_embed_suffix": " (API/GÖMÜLÜ)",
     "mp4_suffix": " (MP4)",
+    "suffix_video": " [Video]",
+    "suffix_audio": " [Ses]",
     "capture_add_error": "Yakalama öğesi eklenirken hata: {error}",
 
     "analyzing": "Analiz Başlatılıyor...",
@@ -112,6 +117,8 @@
     "processing_item": "İşleniyor {index}/{total}: {title}",
     "download_success": "✔ İŞLEM BAŞARILI",
     "download_error": "İndirme Hatası: {error}",
+    "download_error_403": "❌ İndirme Başarısız (HTTP 403): Çerezler veya erişim yetkisi geçersiz. (Sayfa yenilemeyi deneyin)",
+    "download_error_drm": "❌ İndirme Başarısız (DRM): Bu içerik DRM korumalı ve indirilemez.",
     "manual_muxing": "Manuel Birleştirme (Muxing) Başlatılıyor...",
     "ffmpeg_processing": "FFmpeg İşleniyor...",
     "muxing_complete": "✔ TAMAMLANDI: {filename}",

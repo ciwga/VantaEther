@@ -6,6 +6,7 @@
     "language": "Language",
     "choice": "Choice",
     "options": "Options:",
+    "cancelled": "Cancelled",
 
     "system_starting": "INITIALIZING SYSTEM...",
     "ready_status": "✔ SYSTEM READY",
@@ -25,6 +26,8 @@
     "cookie_file_error": "Error creating cookie file: {error}",
     "cookies_deleted": "Sensitive cookies cleaned up.",
     "script_not_found": "// Error: Script file not found.",
+    "default_filename_base": "video",
+    "task_download_key": "dl",
 
     "menu_start_title": "STARTUP MODE SELECTION",
     "menu_option_url": "1. Target URL (Auto/Native)",
@@ -69,6 +72,8 @@
     "master_suffix": " (MASTER)",
     "api_embed_suffix": " (API/EMBED)",
     "mp4_suffix": " (MP4)",
+    "suffix_video": " [Video]",
+    "suffix_audio": " [Audio]",
     "capture_add_error": "Error adding captured item: {error}",
 
     "analyzing": "Analyzing...",
@@ -112,6 +117,8 @@
     "processing_item": "Processing {index}/{total}: {title}",
     "download_success": "✔ OPERATION SUCCESSFUL",
     "download_error": "Download Error: {error}",
+    "download_error_403": "❌ Download Failed (HTTP 403): Cookies or access permissions are invalid. (Try refreshing the page)",
+    "download_error_drm": "❌ Download Failed (DRM): This content is DRM protected and cannot be downloaded.",
     "manual_muxing": "Starting Manual Muxing...",
     "ffmpeg_processing": "FFmpeg Processing...",
     "muxing_complete": "✔ COMPLETED: {filename}",
