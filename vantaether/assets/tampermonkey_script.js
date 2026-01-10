@@ -1,50 +1,127 @@
 // ==UserScript==
-// @name         VantaEther Sync Agent v1.1 (Stable)
+// @name         VantaEther Sync Agent v2.1
 // @namespace    http://localhost/
-// @version      2.0
-// @description  Advanced stream sniffer with Backoff Retry & Queue System
+// @version      2.1
+// @description  Combines Visual Notifications, Iframe Injection, File Sniffing and API/Embed Detection.
 // @match        *://*/*
 // @connect      127.0.0.1
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
 // ==/UserScript==
 
+/**
+ * @fileoverview VantaEther Sync Agent v2.1
+ * This script intercepts network requests (Fetch, XHR) and monitors DOM changes
+ * to detect video streams, licenses, and API endpoints, sending them to a local server.
+ * * IMPROVEMENTS:
+ * - Memory leak protection (Set and Queue caps).
+ * - Performance checks.
+ */
+
 (function() {
     'use strict';
 
+    /**
+     * The endpoint URL for the local analysis server.
+     * @constant {string}
+     */
     const SERVER_URL = "http://127.0.0.1:5005/snipe";
-    const sent = new Set();
-    const requestQueue = [];
-    let isServerOnline = false;
-    let retryDelay = 1000; // Start with 1 second
-    const MAX_DELAY = 30000; // Cap at 30 seconds
+    
+    // --- State Management ---
 
-    // UI Notification Helper
+    /**
+     * Set to store processed URLs to prevent duplicate processing.
+     * Memory Protection: This set is now periodically pruned.
+     * @type {Set<string>}
+     */
+    const sent = new Set();
+
+    /**
+     * Queue to hold payloads when the server is offline.
+     * Memory Protection: Limited to last 500 requests to prevent browser crash.
+     * @type {Array<Object>}
+     */
+    const requestQueue = [];
+
+    /**
+     * Flag indicating the connectivity status of the local server.
+     * @type {boolean}
+     */
+    let isServerOnline = false;
+
+    // --- Memory Protection Helper ---
+    
+    /**
+     * Prunes the 'sent' set if it becomes too large to prevent memory swelling
+     * during long browsing sessions.
+     */
+    function pruneMemory() {
+        if (sent.size > 2000) {
+            sent.clear(); // Simple clear is faster/safer than partial removal for unique URLs
+            // Optional: sendRemoteLog("Agent memory cleaned", "SYSTEM");
+        }
+    }
+
+    // --- UI Notification Helper ---
+
+    /**
+     * Displays a temporary visual notification on the DOM.
+     * * @param {string} msg - The message content to display.
+     * @param {string} color - The background color (CSS value) for the notification.
+     */
     function showNotification(msg, color) {
+        if (!document.body) return;
+        
         const div = document.createElement('div');
-        div.style = `position:fixed;top:10px;left:10px;background:${color};color:black;padding:8px;z-index:999999;font-weight:bold;border-radius:4px;font-family:monospace;box-shadow:0 2px 10px rgba(0,0,0,0.5);font-size:12px;pointer-events:none;`;
+        div.style.cssText = `
+            position: fixed; top: 10px; left: 10px; 
+            background: ${color}; color: black; padding: 8px 12px; 
+            z-index: 2147483647; font-weight: bold; border-radius: 4px; 
+            font-family: monospace; box-shadow: 0 4px 10px rgba(0,0,0,0.5); 
+            font-size: 12px; pointer-events: none; border: 1px solid rgba(255,255,255,0.3);
+        `;
         div.innerText = msg;
         document.body.appendChild(div);
-        setTimeout(() => div.remove(), 3000);
+        
+        // Remove notification after 4 seconds
+        setTimeout(() => { if (div.parentNode) div.remove(); }, 4000);
     }
 
-    function showStatus(msg) {
-        // Minimal console log to avoid spamming user console
-        console.debug(`[VANTA SYSTEM] ${msg}`);
+    // --- Remote Logger ---
+
+    /**
+     * Sends a log message to the server for debugging purposes.
+     * * @param {string} msg - The log message.
+     * @param {string} [level='INFO'] - The severity level of the log.
+     */
+    function sendRemoteLog(msg, level = 'INFO') {
+        safeSend({
+            url: `LOG: ${msg}`,
+            type: 'video', 
+            source: 'REMOTE_LOG',
+            title: level,
+            page: window.location.href,
+            agent: navigator.userAgent
+        });
     }
 
-    // --- CONNECTION MANAGER ---
+    // --- Connection Manager ---
 
+    /**
+     * Flushes queued requests to the server once connection is re-established.
+     */
     function flushQueue() {
         if (requestQueue.length === 0) return;
         
-        showStatus(`Flushing ${requestQueue.length} queued items...`);
-        const batch = [...requestQueue];
-        requestQueue.length = 0; // Clear queue
-        
+        // Process in batches to avoid network congestion
+        const batch = requestQueue.splice(0, requestQueue.length);
         batch.forEach(item => safeSend(item));
     }
 
+    /**
+     * Periodically checks the health status of the local server.
+     * Updates `isServerOnline` state and handles queue flushing.
+     */
     function checkConnection() {
         GM_xmlhttpRequest({
             method: "GET",
@@ -53,33 +130,34 @@
             onload: function(response) {
                 if (response.status === 200) {
                     if (!isServerOnline) {
-                        showStatus("Server connection established.");
                         isServerOnline = true;
-                        retryDelay = 1000; // Reset backoff
+                        sendRemoteLog("VANTA AGENT ONLINE", "SYSTEM");
+                        showNotification("🔌 VANTA AGENT ONLINE", "#00ff41");
                         flushQueue();
                     }
                 }
-                setTimeout(checkConnection, 5000); // Heartbeat every 5s
+                setTimeout(checkConnection, 5000);
             },
             onerror: function() {
                 isServerOnline = false;
-                retryDelay = Math.min(retryDelay * 2, MAX_DELAY);
-                // showStatus(`Server offline. Retrying in ${retryDelay/1000}s...`);
-                setTimeout(checkConnection, retryDelay);
+                setTimeout(checkConnection, 5000);
             }
         });
     }
-
-    // Initialize connection check immediately
+    // Initialize connection check
     checkConnection();
 
-    // --- CAPTURE LOGIC ---
-
+    /**
+     * Safely sends a payload to the server.
+     * If the server is offline, adds the payload to the queue.
+     * * @param {Object} payload - The data object to send.
+     */
     function safeSend(payload) {
         if (!isServerOnline) {
-            // Queue if offline to prevent console errors
-            if (!requestQueue.some(i => i.url === payload.url)) {
-                requestQueue.push(payload);
+            // Queue protection: prevent unlimited growth
+            if (requestQueue.length < 500) {
+                const isDuplicate = requestQueue.some(i => i.url === payload.url);
+                if (!isDuplicate) requestQueue.push(payload);
             }
             return;
         }
@@ -89,39 +167,64 @@
             url: SERVER_URL,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify(payload),
-            onerror: function(err) {
-                isServerOnline = false; // Mark offline immediately on error
-                requestQueue.push(payload); // Re-queue
+            onerror: function() {
+                isServerOnline = false;
+                if (requestQueue.length < 500) {
+                    requestQueue.push(payload);
+                }
             }
         });
     }
 
-    function capture(url, source) {
+    // --- Traffic Analyzer ---
+
+    /**
+     * Analyzes intercepted URLs to detect media streams, licenses, or APIs.
+     * * @param {string} url - The URL to analyze.
+     * @param {string} source - The source of the interception (e.g., 'FETCH', 'XHR').
+     */
+    function analyze(url, source) {
         if (!url || typeof url !== 'string') return;
-        if (url.startsWith('blob:') || url.startsWith('data:')) return; 
+        if (url.startsWith('data:') || url.startsWith('blob:')) return;
+        // Ignore common static assets
+        if (url.match(/\.(png|jpg|jpeg|gif|css|woff|woff2|svg|ico|js|json)$/i)) return;
+
+        // 1. Classic File Extension Detection
+        const isMpd = url.includes('.mpd') || url.includes('dash');
+        const isHls = url.includes('.m3u8') || url.includes('master.txt');
+        const isVideoFile = url.match(/\.(mp4|mkv|webm|ts)$/i);
+        const isSub = url.match(/\.(vtt|srt)$/i);
         
-        // Filter out non-media static assets
-        if (url.match(/\.(jpg|jpeg|png|gif|css|js|woff|woff2|ttf|svg|ico)$/i)) return;
-        if (url.includes('google-analytics') || url.includes('doubleclick')) return;
+        // 2. Advanced API and Embed Detection
+        const isLicense = /license|widevine|drm|rights/i.test(url) && !url.includes('.html');
+        const isPlayerApi = url.includes('/embed/') || 
+                            url.includes('molystream') || 
+                            /\/q\/\d+/.test(url) ||
+                            url.includes('/player/api');
 
-        const isMedia = url.includes('.m3u8') || 
-                        url.includes('.mp4') || 
-                        url.includes('.mpd') || 
-                        url.includes('master.txt') ||
-                        url.includes('.vtt') || 
-                        url.includes('.srt');
+        // Send debug log for analysis
+        sendRemoteLog(`[${source}] ${url.substring(0, 100)}`, 'DEBUG');
 
-        if (!isMedia) return;
+        if (!isMpd && !isHls && !isLicense && !isVideoFile && !isPlayerApi && !isSub) return;
+        
         if (sent.has(url)) return;
-        
         sent.add(url);
         
-        let type = 'video';
-        if (url.includes('.vtt') || url.includes('.srt')) type = 'sub';
+        // Trigger memory cleanup
+        pruneMemory();
 
-        console.log(`[VANTA SNIPER] Captured via ${source}:`, url);
-        if (type === 'video') showNotification(`🎥 CAPTURED: ${source}`, '#00ff41');
-        else showNotification(`📝 SUBTITLE: ${source}`, '#00ffff');
+        // Determine Type and Notification Color
+        let type = 'video';
+        let notifColor = '#00ff41'; // Green
+
+        if (isLicense) { type = 'license'; notifColor = '#ff9900'; }
+        else if (isMpd) { type = 'manifest_dash'; notifColor = '#ff00ff'; } // Magenta
+        else if (isSub) { type = 'sub'; notifColor = '#00ffff'; } // Cyan
+        else if (isPlayerApi) { type = 'stream_api'; notifColor = '#ffff00'; } // Yellow
+
+        // Display Notification and Log Success
+        showNotification(`⚡ ${type.toUpperCase()}: ${source}`, notifColor);
+        sendRemoteLog(`>>> CAPTURED: ${type} - ${url}`, 'SUCCESS');
 
         const payload = {
             url: url,
@@ -129,54 +232,74 @@
             source: source,
             title: document.title,
             page: window.location.href,
-            cookies: document.cookie,
-            agent: navigator.userAgent,
-            referrer: document.referrer
+            agent: navigator.userAgent
         };
-
         safeSend(payload);
     }
 
-    // ---- 1. FETCH API TRAP ----
+    // --- Hooks / Interceptors ---
+    
+    // 1. Fetch API Interceptor
     const originalFetch = window.fetch;
-    window.fetch = async function(...args) {
-        const [resource, config] = args;
+    /**
+     * Overrides window.fetch to capture network requests.
+     * @param {...*} args - Fetch arguments.
+     * @returns {Promise<Response>} The original fetch response.
+     */
+    window.fetch = function(...args) {
+        const [resource] = args;
         const url = (resource instanceof Request) ? resource.url : resource;
-        capture(url, "FETCH");
-        
-        try {
-            const response = await originalFetch.apply(this, args);
-            if (response.url && response.url !== url) capture(response.url, "FETCH_REDIR");
-            return response;
-        } catch(e) { return originalFetch.apply(this, args); }
+        analyze(url, "FETCH");
+        return originalFetch.apply(this, args);
     };
 
-    // ---- 2. XHR TRAP ----
+    // 2. XMLHttpRequest Interceptor
     const originalOpen = XMLHttpRequest.prototype.open;
+    /**
+     * Overrides XMLHttpRequest.open to capture XHR requests and redirects.
+     * @param {string} method - The HTTP method.
+     * @param {string} url - The request URL.
+     */
     XMLHttpRequest.prototype.open = function(method, url) {
-        capture(url, "XHR");
-        this.addEventListener('load', function() { 
-            if (this.responseURL && this.responseURL !== url) {
-                capture(this.responseURL, "XHR_REDIR");
+        analyze(url, "XHR");
+        this.addEventListener('readystatechange', function() {
+            // Check for redirects on request completion
+            if (this.readyState === 4 && this.responseURL && this.responseURL !== url) {
+                analyze(this.responseURL, "XHR_REDIR");
             }
         });
         return originalOpen.apply(this, arguments);
     };
 
-    // ---- 3. MEDIA SRC PROPERTY TRAP ----
-    const srcDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-    if (srcDescriptor) {
-        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
-            set(v) {
-                capture(v, "DOM_SRC");
-                return srcDescriptor.set.call(this, v);
-            },
-            get() { return srcDescriptor.get.call(this); }
-        });
+    // 3. EME (DRM) Interceptor
+    if (navigator.requestMediaKeySystemAccess) {
+        const origEME = navigator.requestMediaKeySystemAccess;
+        /**
+         * Overrides requestMediaKeySystemAccess to detect DRM initialization.
+         * @param {string} keySystem - The key system being requested.
+         * @param {Object[]} config - The configuration options.
+         * @returns {Promise<MediaKeySystemAccess>}
+         */
+        navigator.requestMediaKeySystemAccess = function(keySystem, config) {
+            sendRemoteLog(`DRM INIT: ${keySystem}`, 'DRM_ALERT');
+            showNotification(`🔒 DRM DETECTED: ${keySystem}`, '#ff0000');
+            safeSend({
+                url: "DRM_SIGNAL",
+                type: "license",
+                source: "EME_API",
+                title: keySystem
+            });
+            return origEME.apply(this, arguments);
+        };
     }
 
-    // ---- 4. IFRAME INJECTION TRAP ----
+    // 4. Iframe Injection and Monitoring
     const originalCreateElement = document.createElement;
+    /**
+     * Overrides document.createElement to hook into newly created iframes.
+     * @param {string} tag - The tag name of the element to create.
+     * @returns {HTMLElement} The created element.
+     */
     document.createElement = function(tag) {
         const element = originalCreateElement.call(document, tag);
         if (tag.toLowerCase() === 'iframe') {
@@ -185,13 +308,16 @@
                     const w = element.contentWindow;
                     if (w && w.fetch && w.fetch !== window.fetch) {
                         const iframeFetch = w.fetch;
+                        // Hook fetch inside the iframe context
                         w.fetch = async function(...args) {
                             const [res] = args;
-                            capture((res instanceof Request) ? res.url : res, "IFRAME_FETCH");
+                            analyze((res instanceof Request) ? res.url : res, "IFRAME_FETCH");
                             return iframeFetch.apply(this, args);
                         };
                     }
-                } catch(e) { /* Cross-origin blocked */ }
+                } catch(e) { 
+                    // Cross-origin restrictions may block access to contentWindow
+                }
             });
         }
         return element;
