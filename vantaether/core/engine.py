@@ -1,16 +1,17 @@
-import threading
 import sys
 import time
+import requests
+import threading
 import traceback
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List, Set
 
 import yt_dlp
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.prompt import Prompt, Confirm
 from rich.align import Align
+from rich.console import Console
+from rich.prompt import Prompt, Confirm
 
 from vantaether.config import BANNER
 from vantaether.utils.i18n import LanguageManager
@@ -32,16 +33,25 @@ class VantaEngine:
     """
     Main engine class for managing the UI, stream selection, cookie handling,
     and download execution.
+
+    Orchestrates the interaction between the Flask Server (CaptureManager),
+    the User Interface (Rich), and the Downloader (yt-dlp).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enable_console: bool = False) -> None:
         """
         Initialize the Engine, checking systems and setting up components.
         Establishes the Dependency Injection container behavior.
+
+        Args:
+            enable_console (bool): If True, browser logs are printed immediately.
+                                   If False, the user might be prompted later.
         """
         clear_screen()
         console.print(Align.center(BANNER), style="bold magenta")
         self.analyzer = MediaAnalyzer()
+        
+        self.enable_console = enable_console
         
         try:
             check_systems()
@@ -56,8 +66,12 @@ class VantaEngine:
 
     def wait_for_target_interactive(self) -> Optional[Dict[str, Any]]:
         """
-        Displays an interactive table of captured streams.
+        Displays an interactive table of captured streams and handles user input.
         Starts the Server in a daemon thread, injecting the CaptureManager.
+        
+        Features:
+        - Real-time logging from browser via Remote Log mechanism (Configurable).
+        - 'Clear' command to reset both UI and Server state.
         
         Returns:
             Optional[Dict[str, Any]]: The selected video target object or None.
@@ -68,7 +82,7 @@ class VantaEngine:
                 f"   [dim]{lang.get('manual_step_1_desc')}[/]\n\n"
                 f"[bold white]{lang.get('manual_step_2')}[/]\n"
                 f"   [dim]{lang.get('manual_step_2_desc')}[/]",
-                title="MANUAL SYNC MODE",
+                title=lang.get("manual_sync_title"),
                 border_style="magenta",
                 expand=False,
             )
@@ -78,22 +92,73 @@ class VantaEngine:
         server = VantaServer(capture_manager=self.capture_manager)
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
+        
+        if not self.enable_console:
+            if Confirm.ask(f"[bold yellow]{lang.get('ask_enable_console')}[/]", default=False):
+                self.enable_console = True
+                console.print(f"[green]✔ {lang.get('listen_console')}[/]")
+            else:
+                console.print(f"[dim]{lang.get('console_disabled')}[/]")
 
         selected_target = None
+        seen_logs: Set[str] = set()
+        SERVER_API_URL = "http://127.0.0.1:5005"
+        
+        # Initialized to -1 to distinguish "start state" from "0 items found"
+        last_item_count = -1
 
         try:
             while True:
-                # Optimized waiting loop using threading.Event in CaptureManager
+                # Polling Loop with Remote Log Detection
+                # Wait via event mechanism instead of rapid polling
                 with console.status(
-                    f"[bold yellow]{lang.get('waiting_signal')}[/]",
+                    f"[bold yellow]{lang.get('waiting_signal')}[/] [dim]({lang.get('listen_console') if self.enable_console else lang.get('silent_mode')})[/]",
                     spinner="earth",
-                ):
+                ) as status:
                     while True:
-                        current_status = self.capture_manager.get_status()
-                        if current_status["video_count"] > 0:
-                            break
-                        # Efficient blocking wait
-                        self.capture_manager.wait_for_item(timeout=1.0)
+                        has_new_data = self.capture_manager.wait_for_item(timeout=1.0)
+                        
+                        # Only fetch snapshot if there is new data or we are monitoring logs
+                        if has_new_data or self.enable_console:
+                            snapshot = self.capture_manager.get_snapshot()
+                            raw_videos = snapshot.get("videos", [])
+                            
+                            # Filter out logs and actual videos
+                            real_videos = []
+                            new_logs = []
+                            
+                            for v in raw_videos:
+                                if v.get("source") == "REMOTE_LOG":
+                                    # Only process/show logs if the feature is enabled
+                                    if self.enable_console:
+                                        msg_id = f"{v.get('title')}:{v.get('url')}"
+                                        if msg_id not in seen_logs:
+                                            new_logs.append(v)
+                                            seen_logs.add(msg_id)
+                                else:
+                                    real_videos.append(v)
+                            
+                            # Print new logs immediately (If enabled)
+                            for log_item in new_logs:
+                                level = log_item.get("title", "INFO")
+                                msg = log_item.get("url", "").replace("LOG: ", "")
+                                
+                                style = "dim white"
+                                prefix = lang.get("browser_log_prefix")
+                                
+                                if level == "DRM_ALERT":
+                                    style = "bold white on red"
+                                    prefix = lang.get("drm_detected_prefix")
+                                elif level == "SUCCESS":
+                                    style = "bold green"
+                                    prefix = lang.get("capture_prefix")
+                                
+                                # Print above the status bar
+                                console.print(f"{prefix} {msg}", style=style)
+
+                            current_count = len(real_videos)
+                            if current_count > 0 and current_count > last_item_count:
+                                break
 
                 clear_screen()
                 console.print(Align.center(BANNER), style="bold magenta")
@@ -103,42 +168,69 @@ class VantaEngine:
                 table.add_column(lang.get("source_type"), style="magenta")
                 table.add_column(lang.get("url_short"), style="green")
 
-                # Get thread-safe snapshot
+                # Re-fetch and filter for display
                 display_pool = self.capture_manager.get_snapshot()
-                current_videos = list(display_pool["videos"])
+                all_items = display_pool["videos"]
+                
+                # Filter out logs for the selection table (always hide logs from table)
+                valid_videos = [v for v in all_items if v.get("source") != "REMOTE_LOG"]
+                
+                # Update tracking var
+                last_item_count = len(valid_videos)
 
-                for idx, vid in enumerate(current_videos, 1):
+                for idx, vid in enumerate(valid_videos, 1):
                     u = vid["url"]
                     source = vid.get("source", lang.get("unknown"))
+                    
+                    t_type = vid.get("media_type", "")
 
                     ftype = source
-                    if "master" in u:
-                        ftype += " [bold yellow](MASTER)[/]"
-                    elif "m3u8" in u:
-                        ftype += " (HLS)"
+                    if "manifest" in t_type or "m3u8" in u:
+                        ftype += lang.get("stream_suffix")
+                    elif "master" in u:
+                        ftype += f" [bold yellow]{lang.get('master_suffix')}[/]"
+                    elif "api" in t_type or "embed" in u:
+                        ftype += f" [bold yellow]{lang.get('api_embed_suffix')}[/]"
                     elif "mp4" in u:
-                        ftype += " (MP4)"
+                        ftype += lang.get("mp4_suffix")
 
                     display_url = u[:70] + "..." if len(u) > 70 else u
                     table.add_row(str(idx), ftype, display_url)
 
                 console.print(table)
                 console.print(
-                    f"\n[dim]{lang.get('video_count', video_count=len(current_videos), sub_count=len(display_pool['subs']))}[/]"
+                    f"\n[dim]{lang.get('video_count', video_count=len(valid_videos), sub_count=len(display_pool['subs']))}[/]"
                 )
                 console.print(f"[bold yellow]{lang.get('options')}[/]")
-                console.print(f"  [bold white]{lang.get('enter_id')}[/]")
-                console.print(f"  [bold white]{lang.get('refresh')}[/]")
+                console.print(f"  [bold white]<ID>[/] : {lang.get('enter_id')}")
+                console.print(f"  [bold white]r[/]    : {lang.get('refresh')}")
+                console.print(f"  [bold red]c[/]    : {lang.get('clear_list')}")
+                if self.enable_console:
+                    console.print(f"  [dim white]{lang.get('logs_background_hint')}[/]")
 
                 choice = Prompt.ask(f"\n[bold cyan]{lang.get('command_prompt')}[/]", default="r")
 
                 if choice.lower() == "r":
+                    last_item_count = -1
+                    continue
+                
+                # Handle Clear Command
+                if choice.lower() == "c":
+                    try:
+                        requests.post(f"{SERVER_API_URL}/clear", timeout=2)
+                        seen_logs.clear() # Clear local log memory
+                        last_item_count = -1 # Reset counter to force UI update
+                        console.print(f"[green]{lang.get('list_cleared_success')}[/]")
+                        time.sleep(1)
+                    except Exception as e:
+                        console.print(f"[bold red]{lang.get('clear_failed', error=e)}[/]")
+                        time.sleep(2)
                     continue
 
                 if choice.isdigit():
                     idx = int(choice)
-                    if 1 <= idx <= len(current_videos):
-                        selected_target = current_videos[idx - 1]
+                    if 1 <= idx <= len(valid_videos):
+                        selected_target = valid_videos[idx - 1]
                         console.print(lang.get("selected", url=selected_target['url']))
                         break
                     else:
@@ -190,7 +282,8 @@ class VantaEngine:
             "cookiefile": c_file,
             "listsubtitles": True,
             "socket_timeout": 30,
-            "allow_unplayable_formats": True,
+            # Allow downloading unplayable formats (DRM) to avoid errors during analysis
+            "allow_unplayable_formats": True, 
             "logger": None,
         }
 
@@ -219,6 +312,17 @@ class VantaEngine:
                 if new_target:
                      return self.analyze_and_select(new_target)
                 return None, None, None, "raw", "", False 
+
+        # --- API/Embed Warning for Audio ---
+        # If captured via API sniffing, audio streams might not be visible in initial analysis.
+        if target.get("media_type") in ["stream_api", "embed"] or "embed" in target["url"]:
+             console.print(
+                 Panel(
+                     f"[yellow]{lang.get('api_stream_warning_body')}[/]", 
+                     border_style="yellow",
+                     title=lang.get("api_stream_warning_title")
+                 )
+             )
 
         # --- Quality Selection ---
         formats = info.get("formats", [])
@@ -346,7 +450,7 @@ class VantaEngine:
                             subtitle_info=sub
                         )
                 else:
-                    console.print(f"[bold red]{lang.get('download_error', error='Init failed')}[/]")
+                    console.print(f"[bold red]{lang.get('download_error', error=lang.get('init_failed'))}[/]")
             
         except Exception as e:
             console.print(f"\n[bold red]{lang.get('critical_error')}[/]\n{e}")
