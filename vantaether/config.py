@@ -1,11 +1,12 @@
 from typing import Final
+from vantaether import __version__
 from vantaether.utils.i18n import LanguageManager
 
 
 lang = LanguageManager()
 
 
-VERSION: Final[str] = "2.0"
+VERSION: Final[str] = __version__
 
 BANNER: Final[str] = rf"""
 [bold white]██╗   ██╗ █████╗ ███╗   ██╗████████╗ █████╗[/]
