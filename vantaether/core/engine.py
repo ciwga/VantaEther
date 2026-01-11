@@ -4,6 +4,7 @@ import requests
 import threading
 import traceback
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Optional, Dict, Any, Tuple, List, Set
 
 import yt_dlp
@@ -65,6 +66,9 @@ class VantaEngine:
         """
         Displays an interactive table of captured streams and handles user input.
         Starts the Server in a daemon thread, injecting the CaptureManager.
+
+        Returns:
+            Optional[Dict[str, Any]]: The selected target video object or None.
         """
         
         step1_desc = lang.get('manual_step_1_desc', url=config.SERVER_URL)
@@ -98,7 +102,7 @@ class VantaEngine:
             else:
                 console.print(f"[dim]{lang.get('console_disabled')}[/]")
 
-        selected_target = None
+        selected_target: Optional[Dict[str, Any]] = None
         seen_logs: Set[str] = set()
         
         last_item_count = -1
@@ -180,7 +184,26 @@ class VantaEngine:
                     elif "mp4" in u:
                         ftype += lang.get("mp4_suffix")
 
-                    display_url = u[:70] + "..." if len(u) > 70 else u
+                    # Smart URL Display Logic: Show last 2 path segments instead of beginning
+                    # This provides better context (e.g., filename/folder) than the domain.
+                    display_url: str = u
+                    try:
+                        parsed_url = urlparse(u)
+                        # Filter out empty strings from split (e.g., from leading/trailing slashes)
+                        path_segments: List[str] = [p for p in parsed_url.path.split('/') if p]
+                        
+                        if len(path_segments) >= 2:
+                            # Join the last two segments (e.g. folder/filename.ext)
+                            display_url = f".../{'/'.join(path_segments[-2:])}"
+                        elif len(path_segments) == 1:
+                            display_url = f".../{path_segments[0]}"
+                        else:
+                            # Fallback if no path segments found (e.g. root domain)
+                            display_url = u[:70] + "..." if len(u) > 70 else u
+                    except Exception:
+                        # Fallback to original truncation on parsing error
+                        display_url = u[:70] + "..." if len(u) > 70 else u
+
                     table.add_row(str(idx), ftype, display_url)
 
                 console.print(table)
