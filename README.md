@@ -1,8 +1,9 @@
 # VantaEther
 
-![Version](https://img.shields.io/badge/version-2.1-blue)
-![Python Version](https://img.shields.io/badge/python-3.8+-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-2.1.1-blue?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.8+-yellow?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey?style=flat-square)
 
 **VantaEther** is an advanced media stream sniffer, analyzer, and downloader written in Python. It bridges the gap between native `yt-dlp` support and complex, protected streaming scenarios by utilizing a local server-browser handshake workflow.
 
@@ -16,7 +17,7 @@ It features a modern TUI (Terminal User Interface) powered by `rich`, a modular 
     * **Native Mode:** Direct high-speed downloads for platforms supported natively (e.g., YouTube, Twitch) using `yt-dlp` internals.
     * **Sync Mode (Sniffer):** A local Flask server pairs with a custom UserScript to capture encrypted/protected streams (HLS/m3u8, MP4, API Endpoints) directly from the browser.
 
-* **Smart Network Management (NEW):**
+* **Smart Network Management**
     * **Header Factory:** Implements automated header manipulation and spoofing (Referer/Origin) for strict platforms like Twitter/X.
     * **Universal Domain Spraying:** intelligently analyzes cookies and sprays them across valid subdomains to minimize "403 Forbidden" errors on strict CDNs.
 
@@ -127,23 +128,35 @@ python -m vantaether "https://www.youtube.com/watch?v=example&list=PL...&index=1
 python -m vantaether "https://www.youtube.com/watch?v=example" --audio
 ```
 
-### 2. Interactive Mode
+#### 2. Interactive Mode
 Running without arguments launches the interactive TUI, which guides you through mode selection.
 
 ```bash
 python -m vantaether
 ```
+---
 
+## ⚙️ Server Configuration (Optional)
+By default, the Vanta Sync Server runs on `http://127.0.0.1:5005`. If port `5005` is busy or you are running VantaEther on a remote server/LAN, you can customize the host and port.
+
+This configuration applies to both Option A and Option B:
+### Option A (Installed)
+```bash
+vantaether --host 0.0.0.0 --port 8080
+```
+### Option B (Source)
+```bash
+python -m vantaether --host 0.0.0.0 --port 8080
+```
 ## 🌐 Sync Mode (Browser Sniffing)
 
 For sites that are not natively supported or require authentication/cookies, use the **Sync Mode**.
 
-1.  **Start VantaEther:** Run `python -m vantaether` in your terminal.
+1.  **Start VantaEther:** Run `vantaether` in your terminal.
 2.  **Select Manual/Sync Mode:** The engine will start a background server on port `5005`.
 3.  **Install the UserScript:**
-    * Open your browser and navigate to `http://127.0.0.1:5005`.
-    * Copy the generated UserScript for **Tampermonkey/Violentmonkey**.
-    * Create a new script in your browser's Tampermonkey/Violentmonkey extension and paste the code.
+    * Navigate to the server address (default: `http://127.0.0.1:5005`) in your browser.
+    * Install the VantaEther Sync Agent userscript (Requires Tampermonkey/Violentmonkey).
 4.  **Capture Streams:**
     * Navigate to the website containing the video you want to download.
     * Play the video. The script will intercept the network requests and queue them.
