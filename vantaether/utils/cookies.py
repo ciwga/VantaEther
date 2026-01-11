@@ -1,3 +1,11 @@
+"""
+Handles the secure creation and management of Netscape-formatted cookie files.
+
+This module is critical for ensuring that external tools (like yt-dlp or ffmpeg)
+can authenticate requests using session data captured from the browser.
+Security protocols regarding file permissions are strictly enforced here.
+"""
+
 import os
 import time
 from pathlib import Path
@@ -8,19 +16,19 @@ from rich.console import Console
 from vantaether.utils.i18n import LanguageManager
 from vantaether.utils.system import DirectoryResolver
 
-# Initialize global instances
-console = Console()
-lang = LanguageManager()
-resolver = DirectoryResolver()
+# Initialize global instances for UI output and localization
+console: Console = Console()
+lang: LanguageManager = LanguageManager()
+resolver: DirectoryResolver = DirectoryResolver()
 
-# Constants for Netscape Cookie File format
-NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n"
-NETSCAPE_WARNING = "# This is a generated file! Do not edit.\n\n"
-MAX_EXPIRATION_DATE = 2147483647  # 2038-01-19 (32-bit signed integer max)
+# Constants for Netscape Cookie File format specification
+NETSCAPE_HEADER: str = "# Netscape HTTP Cookie File\n"
+NETSCAPE_WARNING: str = "# This is a generated file! Do not edit.\n\n"
+MAX_EXPIRATION_DATE: int = 2147483647  # 2038-01-19 (Maximum value for 32-bit signed integer)
 
 
 def _get_root_domain(hostname: str) -> str:
-    """Extracts the root domain from a hostname using a naive heuristic.
+    """Extracts the root domain from a hostname using a heuristic approach.
 
     Used primarily to compare if two URLs share the same root scope (e.g.,
     'cdn.example.com' and 'www.example.com').
@@ -34,14 +42,14 @@ def _get_root_domain(hostname: str) -> str:
     """
     if not hostname:
         return ""
-    
+
     parts = hostname.split('.')
     # Naive TLD extraction: assumes the last two parts constitute the root domain.
-    # While not perfect for all TLDs (like .uk vs .co.uk), it suffices for
-    # internal origin matching logic.
+    # While not perfect for complex TLDs (like .uk vs .co.uk), it suffices for
+    # internal origin matching logic within the application context.
     if len(parts) > 2:
         return ".".join(parts[-2:])
-    
+
     return hostname
 
 
@@ -49,8 +57,8 @@ def _generate_domain_variants(url: str) -> Set[str]:
     """Generates a set of valid cookie domain scopes for a given URL.
 
     This implements the 'Universal Spray' logic, ensuring that cookies are
-    available to the host, its subdomains, and its parent domains, increasing
-    the success rate of media downloads.
+    available to the host, its subdomains, and its parent domains, drastically
+    increasing the success rate of media downloads on strict CDNs.
 
     Args:
         url (str): The target URL to parse.
@@ -61,14 +69,14 @@ def _generate_domain_variants(url: str) -> Set[str]:
     domains: Set[str] = set()
     try:
         parsed = urlparse(url)
-        hostname = parsed.hostname
+        hostname: Optional[str] = parsed.hostname
         if not hostname:
             return domains
 
-        # Handle Localhost, IPs, or non-standard hosts
-        is_ip_or_local = (
-            hostname == "localhost" or 
-            hostname.replace(".", "").isdigit() or 
+        # Handle Localhost, IPs, or non-standard hosts where domain expansion is irrelevant
+        is_ip_or_local: bool = (
+            hostname == "localhost" or
+            hostname.replace(".", "").isdigit() or
             ":" in hostname
         )
         if is_ip_or_local:
@@ -77,7 +85,7 @@ def _generate_domain_variants(url: str) -> Set[str]:
 
         # 1. Add exact hostname (e.g., "video.example.com")
         domains.add(hostname)
-        # 2. Add dot-prefixed version (e.g., ".video.example.com")
+        # 2. Add dot-prefixed version (e.g., ".video.example.com") for subdomain matching
         domains.add(f".{hostname}")
 
         # 3. Walk up the domain tree to broaden scope
@@ -90,24 +98,26 @@ def _generate_domain_variants(url: str) -> Set[str]:
             current_parts = current_parts[1:]  # Remove the leading subdomain
             root = ".".join(current_parts)
             domains.add(f".{root}")
-            
+
     except Exception:
-        # If parsing fails entirely, return whatever domains were gathered (if any)
+        # If parsing fails entirely, return whatever domains were gathered (if any).
+        # We suppress errors here to allow the process to continue with partial data.
         pass
-    
+
     return domains
 
 
 def create_cookie_file(
-    cookie_str: str, 
-    url: str, 
+    cookie_str: str,
+    url: str,
     ref_url: Optional[str] = None
 ) -> str:
     """Creates a Netscape-formatted HTTP cookie file using 'Universal Domain Spraying'.
 
     This function parses a raw cookie string and registers it against multiple
     domain variants to ensure maximum compatibility with tools like yt-dlp or ffmpeg.
-    It includes security checks to prevent Cross-Origin pollution.
+    It includes security checks to prevent Cross-Origin pollution and ensures
+    secure file permissions.
 
     Args:
         cookie_str (str): The raw 'Cookie' header string from the browser.
@@ -116,12 +126,12 @@ def create_cookie_file(
             Used to inject referer-based cookies if the domains match.
 
     Returns:
-        str: The absolute path to the generated temporary cookie file. 
+        str: The absolute path to the generated temporary cookie file.
         Returns an empty string if generation fails or no valid domains are found.
     """
     app_dir: Path = resolver.resolve_download_directory()
     filename: Path = app_dir / f"cookies_{int(time.time())}.txt"
-    
+
     target_domains: Set[str] = set()
 
     # 1. Generate variants for Video URL (Primary Target)
@@ -133,9 +143,9 @@ def create_cookie_file(
     # Mismatched cookies can cause 403 Forbidden errors on strict CDNs.
     if ref_url:
         try:
-            v_host = urlparse(url).hostname
-            r_host = urlparse(ref_url).hostname
-            
+            v_host: Optional[str] = urlparse(url).hostname
+            r_host: Optional[str] = urlparse(ref_url).hostname
+
             if v_host and r_host:
                 v_root = _get_root_domain(v_host)
                 r_root = _get_root_domain(r_host)
@@ -144,7 +154,7 @@ def create_cookie_file(
                 if v_root == r_root:
                     target_domains.update(_generate_domain_variants(ref_url))
                 else:
-                    # Log logic could go here; currently implicit skip for safety.
+                    # Logic implies strictly skipping cross-origin referer cookies for safety.
                     pass
         except Exception:
             # Fallback: If heuristic checks fail, ignore referer domains to be safe.
@@ -154,26 +164,28 @@ def create_cookie_file(
         return ""
 
     try:
-        with open(filename, "w", encoding="utf-8") as f:
+        fd = os.open(str(filename), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(NETSCAPE_HEADER)
             f.write(NETSCAPE_WARNING)
-            
+
             if cookie_str:
                 for cookie in cookie_str.split(";"):
                     cookie = cookie.strip()
                     if not cookie or "=" not in cookie:
                         continue
-                        
+
                     try:
                         name, value = cookie.split("=", 1)
-                        
+
                         # Register this cookie for EVERY identified domain variant.
                         # This increases the likelihood that the download tool sends the cookie
                         # regardless of which subdomain it resolves to.
                         for domain in target_domains:
                             # 'TRUE' if domain starts with a dot (subdomain matching), else 'FALSE'
                             flag = "TRUE" if domain.startswith(".") else "FALSE"
-                            
+
                             # Netscape Format:
                             # domain | flag | path | secure | expiration | name | value
                             # Secure is explicitly set to FALSE to allow mixed-content usage.
@@ -182,17 +194,10 @@ def create_cookie_file(
                                 f"{MAX_EXPIRATION_DATE}\t{name}\t{value}\n"
                             )
                             f.write(line)
-                            
+
                     except ValueError:
                         # Skip malformed cookies that don't split correctly
                         continue
-        
-        # Set file permissions to Read/Write for owner only
-        try:
-            os.chmod(filename, 0o600)
-        except OSError:
-            # Ignore permission errors on systems that don't support chmod (e.g., some Windows filesystems)
-            pass
 
         return str(filename)
 
