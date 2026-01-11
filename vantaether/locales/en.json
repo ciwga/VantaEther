@@ -34,9 +34,17 @@
     "menu_option_sync": "2. Sync Mode (Browser Sniffing)",
     "menu_choice": "Your Choice",
     "cli_desc": "VantaEther - Advanced Media Downloader",
+    "cli_epilog": [
+        "Usage Examples:",
+        "  python -m vantaether                   # Default (Localhost:5005)",
+        "  python -m vantaether -p 8080           # Change port if 5005 is busy",
+        "  python -m vantaether --host 0.0.0.0    # Allow access from other devices (LAN)"
+    ],
     "cli_help_url": "Target URL to download (Youtube, Twitch, etc.)",
     "cli_help_audio": "Audio Only Mode: Downloads and converts to MP3.",
     "cli_help_console": "Mirrors browser console logs (DEBUG) to the terminal.",
+    "cli_help_host": "Host address to bind (Default: 127.0.0.1)",
+    "cli_help_port": "Port number for the Vanta Sync Server (Default: 5005)",
     "disclaimer_title": "⚠️ LEGAL DISCLAIMER & TERMS OF USE",
     "disclaimer_text": "This tool is designed for educational purposes and personal archiving ONLY.\nThe user is solely responsible for complying with the copyright laws and Terms of Service\nof the websites accessed. The author accepts NO responsibility for misuse.\n\nDo you accept these terms?",
     "disclaimer_accepted": "Terms accepted. Starting VantaEther...",
@@ -44,9 +52,15 @@
 
     "manual_sync_title": "MANUAL SYNC MODE (HYBRID)",
     "manual_step_1": "STEP 1: Script Setup",
-    "manual_step_1_desc": "1. Go to http://localhost:5005\n   2. Click 'AUTOMATIC INSTALL' or copy manually.",
+    "manual_step_1_desc": [
+        "1. Navigate to {url} in your browser.",
+        "2. Click 'AUTOMATIC INSTALL' or copy manually."
+    ],
     "manual_step_2": "STEP 2: Capture",
-    "manual_step_2_desc": "1. Go to target site and PLAY video.\n   2. List below will auto-populate instantly.",
+    "manual_step_2_desc": [
+        "1. Go to target site and PLAY video.",
+        "2. VantaEther will automatically intercept and capture the stream."
+    ],
     "waiting_signal": "Waiting for Signal... (Play the Video)",
     "listen_console": "Listening to Console...",
     "silent_mode": "Silent Mode",

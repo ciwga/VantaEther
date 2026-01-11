@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional, Generator, Set
 from flask import Flask, jsonify, render_template_string, request, Response
 
 from rich.console import Console
+import vantaether.config as config
 from vantaether.utils.i18n import LanguageManager
 from vantaether.server.templates import render_html_page, get_tampermonkey_script
 
@@ -24,12 +25,6 @@ class CapturedItem:
     """
     Data model representing a captured media item.
     Ensures structural integrity of the data handled by the server.
-    
-    OPTIMIZATION:
-    Implemented as a standard class with __slots__ instead of a dataclass to:
-    1. Fix the 'ValueError' regarding default values conflicting with slots.
-    2. Guarantee memory optimization (no __dict__ overhead) for thousands of items.
-    3. Rename 'type' to 'media_type' to avoid shadowing Python built-ins.
     """
     __slots__ = (
         'url', 'media_type', 'source', 'title', 'page', 
@@ -63,7 +58,7 @@ class CapturedItem:
     def to_dict(self) -> Dict[str, Any]:
         """
         Converts the object attributes to a dictionary for JSON serialization.
-        
+
         Returns:
             Dict[str, Any]: Serialized dictionary with ISO format timestamp.
         """
@@ -229,16 +224,16 @@ class VantaServer:
     Uses Dependency Injection for CaptureManager to ensure testability and isolation.
     """
 
-    def __init__(self, capture_manager: CaptureManager, port: int = 5005) -> None:
+    def __init__(self, capture_manager: CaptureManager, port: Optional[int] = None) -> None:
         """
         Initialize the VantaServer.
 
         Args:
             capture_manager (CaptureManager): The injected dependency for state management.
-            port (int): The port to run the server on. Defaults to 5005.
+            port (Optional[int]): The port to run the server on. If None, fetches from config.
         """
         self.app = Flask(__name__)
-        self.port = port
+        self.port = port if port is not None else config.SERVER_PORT
         self.capture_manager = capture_manager
         self._setup_routes()
 
@@ -326,9 +321,9 @@ class VantaServer:
                 cli.show_server_banner = lambda *x: None # type: ignore
             
             self.app.run(
-                host="127.0.0.1",
+                host=config.SERVER_HOST,
                 port=self.port, 
-                debug=False, 
+                debug=config.DEBUG_MODE, 
                 use_reloader=False,
                 threaded=True
             )

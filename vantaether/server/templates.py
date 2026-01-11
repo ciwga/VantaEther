@@ -1,6 +1,7 @@
 import re
-from typing import Any
 from pathlib import Path
+from typing import Any, Optional
+import vantaether.config as config
 from vantaether.utils.i18n import LanguageManager
 
 
@@ -8,10 +9,21 @@ _temp_lang = LanguageManager()
 
 
 def get_tampermonkey_script() -> str:
-    """Reads the JS file from assets."""
+    """
+    Reads the JS file from assets and dynamically injects 
+    the configured server address and port.
+    """
     path = Path(__file__).resolve().parent.parent / "assets" / "tampermonkey_script.js"
+    
     if path.exists():
-        return path.read_text(encoding="utf-8")
+        raw_content = path.read_text(encoding="utf-8")
+        
+        injected_content = raw_content.replace("{{SERVER_HOST}}", config.SERVER_HOST)
+        injected_content = injected_content.replace("{{SERVER_URL}}", config.SERVER_URL)
+        injected_content = injected_content.replace("{{SERVER_PORT}}", str(config.SERVER_PORT))
+        
+        return injected_content
+        
     return _temp_lang.get("script_not_found")
 
 def get_script_version() -> str:

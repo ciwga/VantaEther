@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         VantaEther Sync Agent v2.1
-// @namespace    http://localhost/
+// @namespace    {{SERVER_URL}}/
 // @version      2.1
 // @description  Combines Visual Notifications, Iframe Injection, File Sniffing and API/Embed Detection.
 // @match        *://*/*
-// @connect      127.0.0.1
+// @connect      {{SERVER_HOST}}
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
 // ==/UserScript==
@@ -23,9 +23,10 @@
 
     /**
      * The endpoint URL for the local analysis server.
+     * Dynamically injected by VantaEther template engine.
      * @constant {string}
      */
-    const SERVER_URL = "http://127.0.0.1:5005/snipe";
+    const SERVER_URL = "{{SERVER_URL}}/snipe";
     
     // --- State Management ---
 
@@ -125,7 +126,7 @@
     function checkConnection() {
         GM_xmlhttpRequest({
             method: "GET",
-            url: "http://127.0.0.1:5005/status",
+            url: "{{SERVER_URL}}/status",
             timeout: 2000,
             onload: function(response) {
                 if (response.status === 200) {

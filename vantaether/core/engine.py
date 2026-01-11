@@ -13,7 +13,7 @@ from rich.align import Align
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 
-from vantaether.config import BANNER
+import vantaether.config as config
 from vantaether.utils.i18n import LanguageManager
 from vantaether.core.analyzer import MediaAnalyzer
 from vantaether.core.selector import FormatSelector
@@ -45,7 +45,7 @@ class VantaEngine:
         Establishes the Dependency Injection container behavior.
         """
         clear_screen()
-        console.print(Align.center(BANNER), style="bold magenta")
+        console.print(Align.center(config.BANNER), style="bold magenta")
         self.analyzer = MediaAnalyzer()
         
         self.enable_console = enable_console
@@ -66,12 +66,20 @@ class VantaEngine:
         Displays an interactive table of captured streams and handles user input.
         Starts the Server in a daemon thread, injecting the CaptureManager.
         """
+        
+        step1_desc = lang.get('manual_step_1_desc', url=config.SERVER_URL)
+        # Indent subsequent lines by 3 spaces to match the f-string padding
+        step1_desc = step1_desc.replace("\n", "\n   ")
+        
+        step2_desc = lang.get('manual_step_2_desc')
+        step2_desc = step2_desc.replace("\n", "\n   ")
+
         console.print(
             Panel(
                 f"[bold white]{lang.get('manual_step_1')}[/]\n"
-                f"   [dim]{lang.get('manual_step_1_desc')}[/]\n\n"
+                f"   [dim]{step1_desc}[/]\n\n"
                 f"[bold white]{lang.get('manual_step_2')}[/]\n"
-                f"   [dim]{lang.get('manual_step_2_desc')}[/]",
+                f"   [dim]{step2_desc}[/]",
                 title=lang.get("manual_sync_title"),
                 border_style="magenta",
                 expand=False,
@@ -92,7 +100,6 @@ class VantaEngine:
 
         selected_target = None
         seen_logs: Set[str] = set()
-        SERVER_API_URL = "http://127.0.0.1:5005"
         
         last_item_count = -1
 
@@ -143,7 +150,7 @@ class VantaEngine:
                                 break
 
                 clear_screen()
-                console.print(Align.center(BANNER), style="bold magenta")
+                console.print(Align.center(config.BANNER), style="bold magenta")
 
                 table = Table(title=lang.get("captured_streams_title"), show_lines=True)
                 table.add_column(lang.get("table_id"), style="cyan", justify="center")
@@ -195,7 +202,7 @@ class VantaEngine:
                 
                 if choice.lower() == "c":
                     try:
-                        requests.post(f"{SERVER_API_URL}/clear", timeout=2)
+                        requests.post(f"{config.SERVER_URL}/clear", timeout=2)
                         seen_logs.clear()
                         last_item_count = -1
                         console.print(f"[green]{lang.get('list_cleared_success')}[/]")

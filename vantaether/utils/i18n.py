@@ -1,7 +1,7 @@
 import json
 import locale
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union, List
 
 
 class LanguageManager:
@@ -16,7 +16,7 @@ class LanguageManager:
         """
         self.base_path = Path(__file__).resolve().parent.parent / "locales"
         self.lang_code = lang_code or self._detect_system_lang()
-        self.strings: Dict[str, str] = self._load_strings()
+        self.strings: Dict[str, Union[str, List[str]]] = self._load_strings()
 
     def _detect_system_lang(self) -> str:
         """Detects system language, defaulting to 'en'."""
@@ -28,7 +28,7 @@ class LanguageManager:
             pass
         return "en"
 
-    def _load_strings(self) -> Dict[str, str]:
+    def _load_strings(self) -> Dict[str, Any]:
         """Loads the JSON file for the current language."""
         file_path = self.base_path / f"{self.lang_code}.json"
         if not file_path.exists():
@@ -45,6 +45,7 @@ class LanguageManager:
     def get(self, key: str, **kwargs: Any) -> str:
         """
         Retrieve a string by key and format it with kwargs.
+        If the value is a list, it joins them with newlines automatically.
 
         Args:
             key (str): The key in the JSON file.
@@ -54,7 +55,11 @@ class LanguageManager:
             str: The formatted string or the key if not found.
         """
         val = self.strings.get(key, key)
+        
+        if isinstance(val, list):
+            val = "\n".join(val)
+            
         try:
             return val.format(**kwargs)
         except Exception:
-            return val
+            return str(val)

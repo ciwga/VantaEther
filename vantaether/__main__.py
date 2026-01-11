@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from yt_dlp.extractor import gen_extractors
 
-from vantaether.config import BANNER
+import vantaether.config as config
 from vantaether.core.engine import VantaEngine
 from vantaether.utils.i18n import LanguageManager
 from vantaether.core.downloader import DownloadManager
@@ -66,11 +66,13 @@ def is_natively_supported(url: str) -> Tuple[bool, Optional[str]]:
 def main() -> None:
     """
     Main entry point for VantaEther.
-    Parses arguments, handles UI initialization, and routes to the appropriate downloader.
+    Parses arguments, configures the server, handles UI initialization, 
+    and routes to the appropriate downloader.
     """
     parser = argparse.ArgumentParser(
         description=lang.get("cli_desc"),
-        epilog="Example: python -m vantaether 'https://...' --audio"
+        epilog=lang.get("cli_epilog"),
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument(
@@ -86,12 +88,29 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "-p", "--port",
+        type=int,
+        help=lang.get("cli_help_port"),
+        default=None
+    )
+
+    parser.add_argument(
+        "--host",
+        type=str,
+        help=lang.get("cli_help_host"),
+        default=None
+    )
+
+    parser.add_argument(
         "--console",
         action="store_true",
         help=lang.get("cli_help_console")
     )
 
     args = parser.parse_args()
+
+    if args.port or args.host:
+        config.configure_server(host=args.host, port=args.port)
 
     # --- LEGAL CHECK ---
     # Display the legal disclaimer at the very start of the execution.
@@ -102,7 +121,7 @@ def main() -> None:
 
     url = args.url
 
-    # Show startup sequence only if running purely interactively (no args)
+    # Show startup sequence only if running purely interactively (no URL arg)
     if not url and not args.audio:
         show_startup_sequence(console, lang)
         

@@ -34,9 +34,17 @@
     "menu_option_sync": "2. Senkron Modu (Tarayıcı İzleme)",
     "menu_choice": "Seçiminiz",
     "cli_desc": "VantaEther - İleri Düzey Medya İndirici",
+    "cli_epilog": [
+        "Kullanım Örnekleri:",
+        "  python -m vantaether                   # Varsayılan (Localhost:5005)",
+        "  python -m vantaether -p 8080           # 5005 doluysa port değiştirin",
+        "  python -m vantaether --host 0.0.0.0    # Ağdaki diğer cihazlara izin ver (LAN)"
+    ],
     "cli_help_url": "İndirilecek Hedef URL (Youtube, Twitch vb.)",
     "cli_help_audio": "Sadece Ses Modu: İndirir ve MP3'e çevirir.",
     "cli_help_console": "Tarayıcı konsol loglarını (DEBUG) terminale yansıtır.",
+    "cli_help_host": "Bağlantı Adresi (Varsayılan: 127.0.0.1)",
+    "cli_help_port": "Vanta Sync Sunucu Portu (Varsayılan: 5005)",
     "disclaimer_title": "⚠️ YASAL UYARI VE KULLANIM KOŞULLARI",
     "disclaimer_text": "Bu araç SADECE eğitim amaçlı ve kişisel arşivleme için tasarlanmıştır.\nErişilen web sitelerinin telif hakkı yasalarına ve Hizmet Koşullarına uymak\ntamamen kullanıcının sorumluluğundadır. Yazar, kötüye kullanım için sorumluluk kabul ETMEZ.\n\nBu koşulları kabul ediyor musunuz?",
     "disclaimer_accepted": "Koşullar kabul edildi. VantaEther başlatılıyor...",
@@ -44,9 +52,15 @@
 
     "manual_sync_title": "MANUAL SENKRON MODU (HİBRİT)",
     "manual_step_1": "ADIM 1: Script Kurulumu",
-    "manual_step_1_desc": "1. http://localhost:5005 adresine gidin.\n   2. 'OTOMATİK KURULUM' butonuna tıklayın veya kodu kopyalayın.",
+    "manual_step_1_desc": [
+        "1. Tarayıcınızda {url} adresine gidin.",
+        "2. 'OTOMATİK KURULUM' butonuna tıklayın veya kodu kopyalayın."
+    ],
     "manual_step_2": "ADIM 2: Yakalama",
-    "manual_step_2_desc": "1. Hedef siteye gidin ve videoyu OYNATIN.\n   2. Liste anında aşağıda belirecektir.",
+    "manual_step_2_desc": [
+        "1. Hedef sayfayı açın ve videoyu OYNATIN.",
+        "2. VantaEther akışı otomatik olarak yakalayacaktır."
+    ],
     "waiting_signal": "Sinyal Bekleniyor... (Videoyu Oynatın)",
     "listen_console": "Tarayıcı Konsolu Dinleniyor...",
     "silent_mode": "Sessiz Mod",
