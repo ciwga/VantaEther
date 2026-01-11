@@ -129,6 +129,7 @@
     "processing_video": "Video Akışı İndiriliyor (ID: {format_id})...",
     "processing_audio": "Ses Akışı İndiriliyor (ID: {format_id})...",
     "processing_item": "İşleniyor {index}/{total}: {title}",
+    "invalid_audio_file": "Birleştirme işlemi atlanıyor: Ses dosyası eksik veya bulunamadı: {audio_file}",
     "download_success": "✔ İŞLEM BAŞARILI",
     "download_error": "İndirme Hatası: {error}",
     "download_error_403": "❌ İndirme Başarısız (HTTP 403): Çerezler veya erişim yetkisi geçersiz. (Sayfa yenilemeyi deneyin)",

@@ -129,6 +129,7 @@
     "processing_video": "Downloading Video Stream (ID: {format_id})...",
     "processing_audio": "Downloading Audio Stream (ID: {format_id})...",
     "processing_item": "Processing {index}/{total}: {title}",
+    "invalid_audio_file": "Skipping merge: Audio file is incomplete or missing: {audio_file}",
     "download_success": "✔ OPERATION SUCCESSFUL",
     "download_error": "Download Error: {error}",
     "download_error_403": "❌ Download Failed (HTTP 403): Cookies or access permissions are invalid. (Try refreshing the page)",

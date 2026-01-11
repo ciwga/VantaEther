@@ -1,8 +1,19 @@
 import os
+import re
 import subprocess
 from pathlib import Path
+from typing import Optional, Dict, Union, List
+
 from rich.console import Console
-from typing import Optional, Dict, Union
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    BarColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TimeElapsedColumn
+)
+
 from vantaether.utils.i18n import LanguageManager
 
 
@@ -12,6 +23,23 @@ lang = LanguageManager()
 
 class StreamMerger:
     """Handles logic for merging video, audio, and subtitle streams."""
+
+    @staticmethod
+    def _parse_time_str(time_str: str) -> float:
+        """
+        Parses FFmpeg time string (HH:MM:SS.ms) into total seconds.
+
+        Args:
+            time_str: Time string like '00:03:45.23'
+
+        Returns:
+            float: Total seconds.
+        """
+        try:
+            h, m, s = time_str.split(':')
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        except ValueError:
+            return 0.0
 
     @staticmethod
     def process_external_sub_sync(
@@ -39,7 +67,7 @@ class StreamMerger:
             audio_file = Path(audio_file)
             # Safety check: Do not attempt to merge partial files
             if ".part" in audio_file.name or not audio_file.exists():
-                console.print(f"[bold red]Skipping merge: Audio file is incomplete or missing: {audio_file}[/]")
+                console.print(f"[bold red]{lang.get('invalid_audio_file', audio_file=audio_file)}[/]")
                 audio_file = None
 
         if url:
@@ -140,11 +168,70 @@ class StreamMerger:
             cmd.append(str(output_file))
             cmd.insert(1, "-strict")
             cmd.insert(2, "experimental")
+            
+            # Regex patterns for parsing FFmpeg output
+            duration_pattern = re.compile(r"Duration:\s*(\d{2}:\d{2}:\d{2}\.\d+)")
+            time_pattern = re.compile(r"time=(\d{2}:\d{2}:\d{2}\.\d+)")
 
-            console.print(f"[yellow]{lang.get('ffmpeg_processing')}[/]")
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            # Use Popen to read stdout line by line for progress
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout for parsing
+                universal_newlines=True,
+                encoding='utf-8',
+                errors='replace'
+            )
 
-            if res.returncode == 0 and output_file.exists():
+            total_duration_secs: Optional[float] = None
+            log_buffer: List[str] = [] # Keep last lines for error reporting
+
+            with Progress(
+                SpinnerColumn("dots", style="bold magenta"),
+                TextColumn("[bold cyan]{task.description}"),
+                BarColumn(
+                    bar_width=None,
+                    style="dim white",
+                    complete_style="bold green",
+                    finished_style="bold green"
+                ),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                "•",
+                TimeElapsedColumn(),
+                "•",
+                TimeRemainingColumn(),
+                console=console
+            ) as progress:
+                
+                # Start with indeterminate task (total=None)
+                task_id = progress.add_task(f"[yellow]{lang.get('ffmpeg_processing')}[/]", total=None)
+
+                if process.stdout:
+                    for line in process.stdout:
+                        log_buffer.append(line)
+                        if len(log_buffer) > 50: # Keep only recent logs to save memory
+                            log_buffer.pop(0)
+
+                        line = line.strip()
+                        
+                        # 1. Attempt to find Total Duration
+                        if total_duration_secs is None:
+                            d_match = duration_pattern.search(line)
+                            if d_match:
+                                total_duration_secs = StreamMerger._parse_time_str(d_match.group(1))
+                                if total_duration_secs > 0:
+                                    progress.update(task_id, total=total_duration_secs)
+
+                        # 2. Attempt to find Current Time
+                        if total_duration_secs:
+                            t_match = time_pattern.search(line)
+                            if t_match:
+                                current_secs = StreamMerger._parse_time_str(t_match.group(1))
+                                progress.update(task_id, completed=current_secs)
+            
+            return_code = process.wait()
+
+            if return_code == 0 and output_file.exists():
                 # Only delete parts if merge was successful
                 if video_file.exists() and video_file != output_file:
                     try:
@@ -170,7 +257,8 @@ class StreamMerger:
 
                 console.print(f"[bold green]{lang.get('muxing_complete', filename=final_name)}[/]")
             else:
-                console.print(f"[bold red]{lang.get('muxing_error')}[/]\n{res.stderr}")
+                error_log = "".join(log_buffer)
+                console.print(f"[bold red]{lang.get('muxing_error')}[/]\n[dim]{error_log}[/]")
 
         except Exception as e:
             console.print(f"[red]{lang.get('merge_error', error=str(e))}[/]")
