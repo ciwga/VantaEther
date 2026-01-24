@@ -13,6 +13,7 @@
     "scanning_platform_database": "Platform veritabanı taranıyor...",
     "ffmpeg_not_found": "FFmpeg BULUNAMADI! 'pkg install ffmpeg' ile veya ffmpeg.org'dan yükleyin.",
     "ffmpeg_missing": "FFmpeg Eksik",
+    "ffmpeg_added_to_path": "FFmpeg {path} dizinine eklendi.",
     "ffprobe_not_found": "FFprobe dosyası bulunamadı.",
     "ffprobe_error": "FFprobe Hatası: {error}",
     "yt_dlp_missing": "yt-dlp Eksik: pip install yt-dlp",
@@ -46,7 +47,13 @@
     "cli_help_host": "Bağlantı Adresi (Varsayılan: 127.0.0.1)",
     "cli_help_port": "Vanta Sync Sunucu Portu (Varsayılan: 5005)",
     "disclaimer_title": "⚠️ YASAL UYARI VE KULLANIM KOŞULLARI",
-    "disclaimer_text": "Bu araç SADECE eğitim amaçlı ve kişisel arşivleme için tasarlanmıştır.\nErişilen web sitelerinin telif hakkı yasalarına ve Hizmet Koşullarına uymak\ntamamen kullanıcının sorumluluğundadır. Yazar, kötüye kullanım için sorumluluk kabul ETMEZ.\n\nBu koşulları kabul ediyor musunuz?",
+    "disclaimer_text": [
+        "Bu araç SADECE eğitim amaçlı ve kişisel arşivleme için tasarlanmıştır.",
+        "Erişilen web sitelerinin telif hakkı yasalarına ve Hizmet Koşullarına uymak",
+        "tamamen kullanıcının sorumluluğundadır. Yazar, kötüye kullanım için sorumluluk kabul ETMEZ.",
+        "",
+        "Bu koşulları kabul ediyor musunuz?"
+    ],
     "disclaimer_accepted": "Koşullar kabul edildi. VantaEther başlatılıyor...",
     "disclaimer_rejected": "Koşullar reddedildi. Çıkış yapılıyor...",
 
@@ -89,6 +96,7 @@
     "suffix_video": " [Video]",
     "suffix_audio": " [Ses]",
     "capture_add_error": "Yakalama öğesi eklenirken hata: {error}",
+    "sub_capture_warning": "Altyazı yakalama uyarısı: {current_idx} sırasında geçersiz/boş URL tespit edildi.",
 
     "analyzing": "Analiz Başlatılıyor...",
     "analysis_failed": "Analiz Başarısız!",
@@ -104,6 +112,7 @@
     "value": "Değer",
     "quality_options": "KALİTE SEÇENEKLERİ",
     "auto_quality": "⚠ Otomatik kalite seçilecek.",
+    "auto_codec_selection": "Stabilite için {height} kalitesinde en iyi codec otomatik seçiliyor.",
     "select_audio": "Farklı bir ses kanalı seçmek ister misiniz?",
     "audio_status": "Ses Durumu",
     "exists": "✔ Var",
@@ -112,12 +121,21 @@
     "audio_choice": "Ses Seçimi",
     "audio_only_active": "⚠ Sadece Ses Modu Aktif: MP3 Ayrıştırılıyor...",
     "api_stream_warning_title": "API AKIŞI TESPİT EDİLDİ",
-    "api_stream_warning_body": "UYARI: Bir API/Embed bağlantısı seçtiniz.\nAnaliz tablosunda ses akışı görünmeyebilir veya 'unknown' olabilir.\nGenellikle indirme başladığında ffmpeg sesi otomatik bulur.",
+    "api_stream_warning_body": [
+        "UYARI: Bir API/Embed bağlantısı seçtiniz.",
+        "Analiz tablosunda ses akışı görünmeyebilir veya 'unknown' olabilir.",
+        "Genellikle indirme başladığında ffmpeg sesi otomatik bulur."
+    ],
     "subtitles_title": "ALTYAZILAR",
     "download_subs": "Altyazı indirilsin mi?",
     "available_subs": "Mevcut: {langs}",
     "subs_count_detected": "{count} dil algılandı.",
-    "embed_mode_prompt": "1. İndir (.srt çevir)\n2. Göm (MP4)\n3. Göm (MKV - Önerilen)\n4. Ham (Raw)",
+    "embed_mode_prompt": [
+        "1. İndir (.srt çevir)",
+        "2. Göm (MP4)",
+        "3. Göm (MKV - Önerilen)",
+        "4. Ham (Raw)"
+    ],
     "embed_mode_choice": "Mod",
     "download_external_sub": "Harici Altyazı İndiriliyor...",
 
@@ -140,17 +158,30 @@
     "muxing_error": "Akış Birleştirme Hatası:",
     "merge_error": "Birleştirme Hatası: {error}",
     "part_file_detected": "⚠ PARÇA DOSYA TESPİT EDİLDİ (Merge Başarısız Oldu)",
-    "part_file_desc": "Video Parçası: {video}\nSes Parçası: {audio}\nScript manuel olarak birleştirecek...",
+    "part_file_desc": [
+        "Video Parçası: {video}",
+        "Ses Parçası: {audio}",
+        "Script manuel olarak birleştirecek..."
+    ],
     "file_not_found": "Dosya bulunamadı: {filename}",
     "file_not_found_pattern": "HATA: Dosya bulunamadı! ({pattern})",
     "video_not_found": "Video bulunamadı.",
     "native_mode_active": "NATIVE MOD DEVREDE",
-    "native_mode_desc": "Platform desteklendiği için doğrudan işlem yapılıyor.\nURL: {url}",
+    "native_mode_desc": [
+        "Platform desteklendiği için doğrudan işlem yapılıyor.",
+        "URL: {url}"
+    ],
     "native_platform": "✔ PLATFORM TANINDI: {name}",
-    "native_desc": "Bu site yt-dlp tarafından RESMİ OLARAK DESTEKLENİYOR.\nNative Mod kullanılarak en yüksek kalitede indirilecek.",
+    "native_desc": [
+        "Bu site yt-dlp tarafından RESMİ OLARAK DESTEKLENİYOR.",
+        "Native Mod kullanılarak indirilecek."
+    ],
     "native_mode_error": "Native Mod Hatası: {error}",
     "protected_site": "! KORUMALI SİTE (Cloudflare) !",
-    "protected_desc": "Site botları engelliyor. SYNC MASTER devreye giriyor.\nLütfen açılan sunucu üzerinden videoyu oynatın.",
+    "protected_desc": [
+        "Site botları engelliyor. SYNC MASTER devreye giriyor.",
+        "Lütfen açılan sunucu üzerinden videoyu oynatın."
+    ],
     "unknown_site": "✔ GENEL / BİLİNMEYEN SİTE",
     "unknown_desc": "Standart site algılandı. Native mod deneniyor veya Manuel moda geçilecek.",
     "manual_mode_ask": "Sync Mode (Manuel) ile denemek ister misiniz?",
@@ -164,7 +195,10 @@
     "playlist_id_detected": "Oynatma Listesi Kimliği algılandı. Tarama modu değiştiriliyor...",
     "playlist_manager": "OYNATMA LİSTESİ YÖNETİCİSİ",
     "confirm_bulk_download": "{count} videoyu indirmek istiyor musunuz?",
-    "bulk_mode_prompt": "1. En İyi Kalite (Otomatik)\n2. Manuel Seçim (Her biri için sor)",
+    "bulk_mode_prompt": [
+        "1. En İyi Kalite (Otomatik)",
+        "2. Manuel Seçim (Her biri için sor)"
+    ],
     "bulk_mode_choice": "Toplu İndirme Modu",
     "unknown_playlist": "Bilinmeyen Oynatma Listesi",
     "menu_specific": ": Belirli videoyu indir (örn. '1')",
@@ -196,7 +230,7 @@
     "html_copied_alert": "Panoya Kopyalandı!",
     "html_status_waiting": "DURUM: Medya Akışı Bekleniyor...",
     "html_js_videos_prefix": "🎯 ",
-    "html_js_video_captured": "VİDEO(LAR) YAKALANDI",
+    "html_js_video_captured": "VİDEO(S) YAKALANDI",
     "html_js_subtitle_captured": "ALTYAZI(LAR) YAKALANDI",
     "command_prompt": "Komut",
     "table_title": "Başlık",
@@ -204,5 +238,63 @@
     "table_bitrate": "Bit Hızı",
     "table_ext": "Uzantı",
     "table_format_id": "Format ID",
-    "table_note_suffix": " / Not"
+    "table_note_suffix": " / Not",
+
+    "polling_error": "Veri Alma Hatası: {error}",
+    "network_error_prefix": "Ağ Hatası:",
+    "unhandled_ui_exception": "Beklenmeyen Arayüz Hatası:",
+    "filename_error": "Dosya Adı Hatası: {error}",
+    "cleanup_partial_failure": "Başarısızlık nedeniyle eksik dosyalar temizleniyor...",
+    "playlist_manager_error": "Oynatma Listesi Yöneticisi Hatası: {error}",
+    "default_video_title": "Video {index}",
+    "unexpected_download_error": "İndirme Akışında Beklenmeyen Hata: {error}",
+    "download_failed_cleanup": "İndirme başarısız, temizleniyor...",
+    "file_detection_failed": "Dosya tespiti başarısız: {error}",
+    "merge_failed_generic": "Birleştirme başarısız: {error}",
+
+    "codec_images": "Görüntüler",
+    "audio_note": "Not",
+    "playlist_more_items": "... ve {count} tane daha ...",
+    "playlist_unknown_title": "Bilinmeyen Oynatma Listesi",
+    "subtitle_download_failed": "Altyazı indirme hatası: {error}",
+    "merge_video_not_found": "Birleştirme Hatası: Video dosyası bulunamadı: {path}",
+    "last_log_label": "Son Log Kaydı: {log}",
+    "ffprobe_empty_output": "FFprobe boş çıktı döndürdü.",
+    "ffprobe_timeout": "FFprobe analizi zaman aşımına uğradı (Dosya bozuk veya çok büyük olabilir).",
+    "ffprobe_json_error": "FFprobe JSON Ayrıştırma Hatası: {error}",
+    "analysis_unexpected_error": "Beklenmeyen Analiz Hatası: {error}",
+    "unknown_filename": "Bilinmeyen Dosya",
+    "unknown_process_error": "Bilinmeyen İşlem Hatası",
+    "unknown_value": "Bilinmiyor",
+    "subtitle_label": "Altyazı",
+    "unknown_short": "Bil.",
+    "no_streams_found": "Akış bulunamadı.",
+
+    "script_file_error": "// Hata: Script dosyası {path} konumunda bulunamadı",
+    "script_read_error": "// Hata: Script okuma hatası: {error}",
+    "template_error": "Şablon Hatası: {error}",
+    "install_script_error": "// Hata: {error}",
+    "snipe_error": "Snipe Uç Nokta Hatası: {error}",
+    "port_busy_error": "Port {port} meşgul. VantaEther zaten çalışıyor mu?",
+    "server_startup_failed": "Sunucu Başlatma Hatası: {error}",
+    "server_crash": "Beklenmeyen Sunucu Çökmesi: {error}",
+    "serialization_failed": "serilestirme_basarisiz",
+    "api_no_data": "Veri yok",
+    "system_check_failed": "Sistem kontrolü başarısız: {error}",
+    "critical_io_error_cwd": "KRİTİK G/Ç HATASI: {error}. Çalışma dizini (CWD) kullanılıyor.",
+    "default_download_name": "video_indirme",
+
+    "trying_client": "İstemci deneniyor: {client}",
+    "client_failed": "İstemci '{client}' başarısız oldu: {error}",
+    "critical_filesystem_error": "KRİTİK DOSYA SİSTEMİ HATASI. İptal ediliyor.",
+    "retrying_next_client": "Sıradaki istemci deneniyor...",
+    "all_clients_failed": "Tüm istemciler başarısız oldu.",
+
+    "smart_mode_alert": [
+        "⚠️ Platform akış detaylarını gizliyor (Bilinmeyen Çözünürlük).",
+        "Endişelenmeyin! [bold white]Akıllı Mod[/] devreye girdi.",
+        "Mevcut olan [bold green]EN YÜKSEK KALİTE[/] otomatik olarak indirilecek."
+    ],
+    "standard_client_name": "Standart (Native)",
+    "client_attempt_failed": "⚠ {client} başarısız: {error}"
 }

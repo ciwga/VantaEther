@@ -4,27 +4,29 @@ import json
 import logging
 import threading
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Generator, Set
+from typing import Dict, List, Any, Optional, Generator, Set, Tuple
 
 from flask import Flask, jsonify, render_template_string, request, Response
-
+from werkzeug.serving import make_server
 from rich.console import Console
+
 import vantaether.config as config
 from vantaether.utils.i18n import LanguageManager
 from vantaether.server.templates import render_html_page, get_tampermonkey_script
+from vantaether.exceptions import NetworkError
 
-# Initialize Logger specifically for Flask/Werkzeug to suppress generic output
+
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
 console = Console()
-lag = LanguageManager()
+lang = LanguageManager()
 
 
 class CapturedItem:
     """
     Data model representing a captured media item.
-    Ensures structural integrity of the data handled by the server.
+    Ensures structural integrity and serialization of the data handled by the server.
     """
     __slots__ = (
         'url', 'media_type', 'source', 'title', 'page', 
@@ -43,7 +45,7 @@ class CapturedItem:
         referrer: Optional[str] = None
     ) -> None:
         """
-        Initializes the captured item. 
+        Initializes the captured item with timestamp.
         """
         self.url = url
         self.media_type = media_type
@@ -58,21 +60,24 @@ class CapturedItem:
     def to_dict(self) -> Dict[str, Any]:
         """
         Converts the object attributes to a dictionary for JSON serialization.
-
+        
         Returns:
-            Dict[str, Any]: Serialized dictionary with ISO format timestamp.
+            Dict[str, Any]: Serialized data with ISO format timestamp.
         """
-        return {
-            'url': self.url,
-            'media_type': self.media_type,
-            'source': self.source,
-            'title': self.title,
-            'page': self.page,
-            'cookies': self.cookies,
-            'agent': self.agent,
-            'referrer': self.referrer,
-            'timestamp': self.timestamp.isoformat()
-        }
+        try:
+            return {
+                'url': self.url,
+                'media_type': self.media_type,
+                'source': self.source,
+                'title': self.title,
+                'page': self.page,
+                'cookies': self.cookies,
+                'agent': self.agent,
+                'referrer': self.referrer,
+                'timestamp': self.timestamp.isoformat()
+            }
+        except Exception:
+            return {'url': self.url, 'error': lang.get('serialization_failed')}
 
 
 class CaptureManager:
@@ -84,38 +89,43 @@ class CaptureManager:
     def __init__(self) -> None:
         """
         Initializes the CaptureManager with thread-safe locks and storage lists.
-        Defines the valid video types including API endpoints and manifests.
         """
         self._videos: List[CapturedItem] = []
         self._subs: List[CapturedItem] = []
+        
+        # Lock for thread safety when modifying lists
         self._lock: threading.Lock = threading.Lock()
+        
+        # Event to notify consumers (Engine/SSE) of new items
         self._event: threading.Event = threading.Event()
 
-        # Limit the list size to prevent infinite growth during long sessions.
+        # Limit the list size to prevent infinite memory growth
         self._MAX_ITEMS = 2000
 
         # Defines all types that should be treated as "Video" sources
+        # 'log' is included here so it enters the pipeline, but Engine filters it later.
         self.VIDEO_TYPES: Set[str] = {
             "video",
             "manifest_dash",  # .mpd
             "manifest_hls",   # .m3u8
             "stream_api",     # JSON API endpoints (/embed/, /q/1 etc.)
-            "license"         # DRM License URLs
+            "license",        # DRM License URLs
+            "log"             # Remote browser logs
         }
 
     def _prune_list(self, target_list: List[Any]) -> None:
         """
         Internal helper: Removes the oldest items if the list exceeds the maximum size.
-        This prevents memory leaks (unbounded growth) in long-running processes.
+        This prevents memory leaks in long-running sessions.
         """
         if len(target_list) > self._MAX_ITEMS:
-            # Remove the oldest 10% of items to avoid frequent resizing
+            # Remove the oldest 10% of items (FIFO)
             del target_list[:int(self._MAX_ITEMS * 0.1)]
 
     def add_item(self, data: Dict[str, Any]) -> bool:
         """
         Adds a new item to the pool if it's not a duplicate.
-        Triggers the notification event if an item is added.
+        Triggers the notification event if an item is successfully added.
 
         Args:
             data (Dict[str, Any]): The raw JSON data from the request.
@@ -124,13 +134,14 @@ class CaptureManager:
             bool: True if added, False if duplicate or invalid.
         """
         try:
+            # Basic Validation
             if "url" not in data or "type" not in data:
                 return False
 
             item = CapturedItem(
                 url=data["url"],
                 media_type=data["type"],
-                source=data.get("source", "Unknown"),
+                source=data.get("source", lang.get("unknown")),
                 title=data.get("title"),
                 page=data.get("page"),
                 cookies=data.get("cookies"),
@@ -138,35 +149,38 @@ class CaptureManager:
                 referrer=data.get("referrer")
             )
 
+            added = False
             with self._lock:
-                added = False
-                
+                # Deduplication & Classification Logic
                 if item.media_type in self.VIDEO_TYPES:
+                    # Check if URL already exists in video list
                     if not any(v.url == item.url for v in self._videos):
                         self._videos.append(item)
-                        self._prune_list(self._videos) # Enforce memory limit
+                        self._prune_list(self._videos)
                         added = True
+                        
                 elif item.media_type == "sub":
+                    # Check if URL already exists in sub list
                     if not any(s.url == item.url for s in self._subs):
                         self._subs.append(item)
                         self._prune_list(self._subs)
                         added = True
-                
-                # Trigger event if new data arrived to wake up consumers
-                if added:
-                    self._event.set()
-                    return True
+
+            if added:
+                # Wake up any threads waiting for data
+                self._event.set()
+                return True
+            
             return False
             
         except Exception as e:
-            console.print(f"[red]{lag.get('capture_add_error', error=e)}[/]")
+            console.print(f"[red]{lang.get('capture_add_error', error=e)}[/]")
             return False
 
     def wait_for_item(self, timeout: Optional[float] = None) -> bool:
         """
         Blocks until a new item is added or timeout occurs.
-        This allows consumers (like the Engine or SSE stream) to wait efficiently without busy loops.
-
+        
         Args:
             timeout (Optional[float]): Time in seconds to wait. None for indefinite.
 
@@ -179,27 +193,17 @@ class CaptureManager:
         return flag
 
     def get_status(self) -> Dict[str, int]:
-        """
-        Returns the current count of captured items safely.
-
-        Returns:
-            Dict[str, int]: A dictionary containing counts of videos and subs.
-        """
+        """Returns the current count of captured items safely."""
         with self._lock:
+            # Exclude logs from the visible video count
+            real_vid_count = sum(1 for v in self._videos if v.media_type != "log")
             return {
-                "video_count": len(self._videos),
+                "video_count": real_vid_count,
                 "sub_count": len(self._subs)
             }
 
     def get_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Returns a thread-safe snapshot of current data.
-        
-        Note: This involves copying data. Frequent calls with large lists should be avoided.
-
-        Returns:
-            Dict[str, List[Dict[str, Any]]]: Complete lists of videos and subtitles.
-        """
+        """Returns a thread-safe snapshot/copy of current data."""
         with self._lock:
             return {
                 "videos": [v.to_dict() for v in self._videos],
@@ -207,10 +211,7 @@ class CaptureManager:
             }
 
     def clear_pool(self) -> None:
-        """
-        Clears all captured videos and subtitles from the memory.
-        Resets the event state.
-        """
+        """Clears all captured videos and subtitles from memory."""
         with self._lock:
             self._videos.clear()
             self._subs.clear()
@@ -221,20 +222,22 @@ class VantaServer:
     """
     Background Flask server to receive captured streams from the browser.
     
-    Uses Dependency Injection for CaptureManager to ensure testability and isolation.
+    Uses Werkzeug's make_server for robust thread control, avoiding the limitations
+    of the standard app.run() development server.
     """
 
-    def __init__(self, capture_manager: CaptureManager, port: Optional[int] = None) -> None:
+    def __init__(self, capture_manager: Optional[CaptureManager] = None, port: Optional[int] = None) -> None:
         """
         Initialize the VantaServer.
-
+        
         Args:
-            capture_manager (CaptureManager): The injected dependency for state management.
-            port (Optional[int]): The port to run the server on. If None, fetches from config.
+            capture_manager: Injected manager instance. Creates new if None.
+            port: Port to bind. Defaults to config.SERVER_PORT.
         """
         self.app = Flask(__name__)
         self.port = port if port is not None else config.SERVER_PORT
-        self.capture_manager = capture_manager
+        self.capture_manager = capture_manager if capture_manager else CaptureManager()
+        self.server = None 
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -242,37 +245,31 @@ class VantaServer:
         
         @self.app.route("/")
         def index() -> str:
-            """
-            Serves the main page with the Tampermonkey/Violentmonkey script code.
-            Renders localized HTML based on the system language.
-            """
-            script_content = get_tampermonkey_script()
-            html_content = render_html_page(lag)
-            return render_template_string(html_content, script=script_content)
+            """Serves the main page with instructions and the userscript."""
+            try:
+                script_content = get_tampermonkey_script()
+                html_content = render_html_page(lang)
+                return render_template_string(html_content, script=script_content)
+            except Exception as e:
+                return lang.get("template_error", error=e)
 
         @self.app.route("/vantaether.user.js")
         def install_script() -> Response:
-            """
-            Serves the script with the correct MIME type to trigger 
-            Tampermonkey/Violentmonkey installation dialog automatically.
-            """
-            script_content = get_tampermonkey_script()
-            return Response(script_content, mimetype="application/javascript")
+            """Serves the raw userscript file for installation."""
+            try:
+                script_content = get_tampermonkey_script()
+                return Response(script_content, mimetype="application/javascript")
+            except Exception as e:
+                return Response(lang.get("install_script_error", error=e), mimetype="application/javascript")
 
         @self.app.route("/status")
         def status() -> Response:
-            """
-            Returns the current count of captured items.
-            Used for polling if SSE is not active.
-            """
+            """Returns the current capture counts."""
             return jsonify(self.capture_manager.get_status())
         
         @self.app.route("/clear", methods=["POST"])
         def clear_list() -> Response:
-            """
-            Clears the capture pool.
-            Called by the engine when the user requests a reset.
-            """
+            """Clears the capture pool."""
             self.capture_manager.clear_pool()
             return jsonify({"status": "cleared"}), 200
 
@@ -280,52 +277,94 @@ class VantaServer:
         def stream() -> Response:
             """
             Server-Sent Events (SSE) endpoint.
-            Push updates to the browser when new media is captured,
-            eliminating the need for polling from the frontend.
+            Pushes updates to the browser UI in real-time.
             """
             def event_stream() -> Generator[str, None, None]:
                 while True:
-                    self.capture_manager.wait_for_item(timeout=20.0)
-                    
-                    data = self.capture_manager.get_status()
-                    json_str = json.dumps(data)
-                    yield f"data: {json_str}\n\n"
-                    
-                    # Small sleep to prevent rapid-fire events in edge cases
-                    time.sleep(0.1)
+                    try:
+                        # Block until data arrives or heartbeat timeout (20s)
+                        self.capture_manager.wait_for_item(timeout=20.0)
+                        
+                        data = self.capture_manager.get_status()
+                        json_str = json.dumps(data)
+                        yield f"data: {json_str}\n\n"
+                        
+                        # Small buffer to prevent rapid-fire loop in edge cases
+                        time.sleep(0.1)
+                    except GeneratorExit:
+                        # Client disconnected
+                        break
+                    except Exception:
+                        time.sleep(1)
+                        yield ": heartbeat\n\n"
 
             return Response(event_stream(), mimetype="text/event-stream")
 
         @self.app.route("/snipe", methods=["POST"])
-        def snipe() -> tuple[Response, int]:
+        def snipe() -> Tuple[Response, int]:
             """
-            Endpoint for Tampermonkey/Violentmonkey to POST captured data.
-            Receives JSON payload and delegates to CaptureManager.
+            Endpoint to receive captured data from the userscript.
+            This is the main entry point for data coming from the browser.
             """
-            data = request.json
-            if not data:
-                return jsonify({"status": "error", "msg": "No data"}), 400
+            try:
+                data = request.json
+                if not data:
+                    return jsonify({"status": "error", "msg": lang.get("api_no_data")}), 400
 
-            added = self.capture_manager.add_item(data)
+                # This helps debugging connection issues immediately
+                m_type = data.get("type", "unknown")
+                m_url = data.get("url", "no_url")
+                
+                # Truncate long URLs for display
+                disp_url = (m_url[:60] + '..') if len(m_url) > 60 else m_url
+                
+                if m_type == "log":
+                    # Logs are handled differently in UI, but good to know they arrived
+                    pass
+                else:
+                    # Visible feedback for valid media items
+                    color = "green" if "manifest" in m_type else "yellow"
+                    console.print(f"[dim]Recv:[/][{color}]{m_type}[/] -> {disp_url}")
+
+                added = self.capture_manager.add_item(data)
+                
+                if added:
+                    return jsonify({"status": "received"}), 200
+                else:
+                    # Duplicate or invalid
+                    return jsonify({"status": "duplicate_or_invalid"}), 200
             
-            if added:
-                return jsonify({"status": "received"}), 200
-            else:
-                return jsonify({"status": "duplicate_or_invalid"}), 200
+            except Exception as e:
+                 console.print(f"[red]{lang.get('snipe_error', error=e)}[/]")
+                 return jsonify({"status": "error", "msg": str(e)}), 500
 
     def run(self) -> None:
-        """Starts the Flask server quietly."""
+        """
+        Starts the Flask server using werkzeug's make_server.
+        
+        This method is blocking and should typically be run in a separate thread.
+        It handles port conflicts gracefully.
+        
+        Raises:
+            NetworkError: If the server fails to bind to the port.
+        """
         try:
+            # Suppress Flask's startup banner
             cli = sys.modules.get("flask.cli")
             if cli:
                 cli.show_server_banner = lambda *x: None # type: ignore
             
-            self.app.run(
-                host=config.SERVER_HOST,
-                port=self.port, 
-                debug=config.DEBUG_MODE, 
-                use_reloader=False,
-                threaded=True
-            )
+            # Create a robust WSGI server
+            self.server = make_server(config.SERVER_HOST, self.port, self.app)
+            self.server.serve_forever()
+            
+        except OSError as e:
+            if e.errno == 98 or e.errno == 48: # Address already in use
+                error_msg = lang.get("port_busy_error", port=self.port)
+            else:
+                error_msg = str(e)
+            
+            raise NetworkError(lang.get("server_startup_failed", error=error_msg))
+            
         except Exception as e:
-            console.print(f"[red]{lag.get('flask_service_error', error=e)}[/]")
+             raise NetworkError(lang.get("server_crash", error=e))

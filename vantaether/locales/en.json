@@ -13,6 +13,7 @@
     "scanning_platform_database": "Scanning platform database...",
     "ffmpeg_not_found": "FFmpeg NOT FOUND! Install via 'pkg install ffmpeg' or download from ffmpeg.org.",
     "ffmpeg_missing": "FFmpeg Missing",
+    "ffmpeg_added_to_path": "FFmpeg added to {path}",
     "ffprobe_not_found": "FFprobe binary not found.",
     "ffprobe_error": "FFprobe Error: {error}",
     "yt_dlp_missing": "yt-dlp Missing: pip install yt-dlp",
@@ -46,7 +47,13 @@
     "cli_help_host": "Host address to bind (Default: 127.0.0.1)",
     "cli_help_port": "Port number for the Vanta Sync Server (Default: 5005)",
     "disclaimer_title": "⚠️ LEGAL DISCLAIMER & TERMS OF USE",
-    "disclaimer_text": "This tool is designed for educational purposes and personal archiving ONLY.\nThe user is solely responsible for complying with the copyright laws and Terms of Service\nof the websites accessed. The author accepts NO responsibility for misuse.\n\nDo you accept these terms?",
+    "disclaimer_text": [
+        "This tool is designed for educational purposes and personal archiving ONLY.",
+        "The user is solely responsible for complying with the copyright laws and Terms of Service",
+        "of the websites accessed. The author accepts NO responsibility for misuse.",
+        "",
+        "Do you accept these terms?"
+    ],
     "disclaimer_accepted": "Terms accepted. Starting VantaEther...",
     "disclaimer_rejected": "Terms rejected. Exiting...",
 
@@ -89,6 +96,7 @@
     "suffix_video": " [Video]",
     "suffix_audio": " [Audio]",
     "capture_add_error": "Error adding captured item: {error}",
+    "sub_capture_warning": "Subtitle capture warning: Empty URL at index {current_idx}",
 
     "analyzing": "Analyzing...",
     "analysis_failed": "Analysis Failed!",
@@ -104,6 +112,7 @@
     "value": "Value",
     "quality_options": "QUALITY OPTIONS",
     "auto_quality": "⚠ Automatic quality selected.",
+    "auto_codec_selection": "Automatically selecting the most stable codec for {height}.",
     "select_audio": "Select a different audio channel?",
     "audio_status": "Audio Status",
     "exists": "✔ Exists",
@@ -112,12 +121,21 @@
     "audio_choice": "Audio Choice",
     "audio_only_active": "⚠ Audio Only Mode Active: Extracting MP3...",
     "api_stream_warning_title": "API STREAM DETECTED",
-    "api_stream_warning_body": "WARNING: You selected an API/Embed link.\nThe audio stream might not be visible in the analysis table or show as 'unknown'.\nUsually, ffmpeg finds the audio automatically when the download starts.",
+    "api_stream_warning_body": [
+        "WARNING: You selected an API/Embed link.",
+        "The audio stream might not be visible in the analysis table or show as 'unknown'.",
+        "Usually, ffmpeg finds the audio automatically when the download starts."
+    ],
     "subtitles_title": "SUBTITLES",
     "download_subs": "Download subtitles?",
     "available_subs": "Available: {langs}",
     "subs_count_detected": "{count} languages detected.",
-    "embed_mode_prompt": "1. Download (.srt convert)\n2. Embed (MP4)\n3. Embed (MKV - Recommended)\n4. Raw",
+    "embed_mode_prompt": [
+        "1. Download (.srt convert)",
+        "2. Embed (MP4)",
+        "3. Embed (MKV - Recommended)",
+        "4. Raw"
+    ],
     "embed_mode_choice": "Mode",
     "download_external_sub": "Downloading External Subtitle...",
 
@@ -140,17 +158,30 @@
     "muxing_error": "Muxing Error:",
     "merge_error": "Merge Error: {error}",
     "part_file_detected": "⚠ PART FILE DETECTED (Merge Failed)",
-    "part_file_desc": "Video: {video}\nAudio: {audio}\nScript will merge manually...",
+    "part_file_desc": [
+        "Video: {video}",
+        "Audio: {audio}",
+        "Script will merge manually..."
+    ],
     "file_not_found": "File not found: {filename}",
     "file_not_found_pattern": "ERROR: File not found! ({pattern})",
     "video_not_found": "Video not found.",
     "native_mode_active": "NATIVE MODE ACTIVE",
-    "native_mode_desc": "Platform supported. Direct download initiated.\nURL: {url}",
+    "native_mode_desc": [
+        "Platform supported. Direct download initiated.",
+        "URL: {url}"
+    ],
     "native_platform": "✔ PLATFORM RECOGNIZED: {name}",
-    "native_desc": "Officially supported by yt-dlp. Downloading in highest quality.",
+    "native_desc": [
+        "Officially supported by yt-dlp.",
+        "It will be downloaded using Native Mod."
+    ],
     "native_mode_error": "Native Mode Error: {error}",
     "protected_site": "! PROTECTED SITE (Cloudflare) !",
-    "protected_desc": "Site blocks bots. SYNC MASTER activated.\nPlease play video via the local server.",
+    "protected_desc": [
+        "Site blocks bots. SYNC MASTER activated.",
+        "Please play video via the local server."
+    ],
     "unknown_site": "✔ GENERAL / UNKNOWN SITE",
     "unknown_desc": "Standard site detected. Attempting Native fallback or Manual Mode.",
     "manual_mode_ask": "Try Manual Sync Mode?",
@@ -164,7 +195,10 @@
     "playlist_id_detected": "Playlist ID detected. Switching probe mode...",
     "playlist_manager": "PLAYLIST MANAGER",
     "confirm_bulk_download": "Download {count} videos?",
-    "bulk_mode_prompt": "1. Best Quality (Auto)\n2. Manual Selection (Prompt for each)",
+    "bulk_mode_prompt": [
+        "1. Best Quality (Auto)",
+        "2. Manual Selection (Prompt for each)"
+    ],
     "bulk_mode_choice": "Bulk Mode",
     "unknown_playlist": "Unknown Playlist",
     "menu_specific": ": Download specific video (e.g. '1')",
@@ -204,5 +238,63 @@
     "table_bitrate": "Bitrate",
     "table_ext": "Ext",
     "table_format_id": "Format ID",
-    "table_note_suffix": " / Note"
+    "table_note_suffix": " / Note",
+
+    "polling_error": "Polling Error: {error}",
+    "network_error_prefix": "Network Error:",
+    "unhandled_ui_exception": "Unhandled UI Exception:",
+    "filename_error": "Filename Error: {error}",
+    "cleanup_partial_failure": "Cleaning up partial files due to failure...",
+    "playlist_manager_error": "Playlist Manager Error: {error}",
+    "default_video_title": "Video {index}",
+    "unexpected_download_error": "Unexpected Error in Download Stream: {error}",
+    "download_failed_cleanup": "Download failed, cleaning up...",
+    "file_detection_failed": "File detection failed: {error}",
+    "merge_failed_generic": "Merge failed: {error}",
+
+    "codec_images": "Images",
+    "audio_note": "Note",
+    "playlist_more_items": "... and {count} more ...",
+    "playlist_unknown_title": "Unknown Playlist",
+    "subtitle_download_failed": "Subtitle download failed: {error}",
+    "merge_video_not_found": "Merge Error: Video file not found: {path}",
+    "last_log_label": "Last Log: {log}",
+    "ffprobe_empty_output": "FFprobe returned empty output.",
+    "ffprobe_timeout": "FFprobe analysis timed out (File might be corrupt or too large).",
+    "ffprobe_json_error": "FFprobe JSON Parse Error: {error}",
+    "analysis_unexpected_error": "Unexpected Analysis Error: {error}",
+    "unknown_filename": "Unknown File",
+    "unknown_process_error": "Unknown Process Error",
+    "unknown_value": "Unknown",
+    "subtitle_label": "Subtitle",
+    "unknown_short": "Unk",
+    "no_streams_found": "No streams found.",
+
+    "script_file_error": "// Error: Script file not found at {path}",
+    "script_read_error": "// Error reading script: {error}",
+    "template_error": "Template Error: {error}",
+    "install_script_error": "// Error: {error}",
+    "snipe_error": "Snipe Endpoint Error: {error}",
+    "port_busy_error": "Port {port} is busy. Is VantaEther already running?",
+    "server_startup_failed": "Server Startup Failed: {error}",
+    "server_crash": "Unexpected Server Crash: {error}",
+    "serialization_failed": "serialization_failed",
+    "api_no_data": "No data",
+    "system_check_failed": "System check failed: {error}",
+    "critical_io_error_cwd": "CRITICAL IO ERROR: {error}. Using CWD.",
+    "default_download_name": "video_download",
+
+    "trying_client": "Trying client: {client}",
+    "client_failed": "Client '{client}' failed: {error}",
+    "critical_filesystem_error": "Critical filesystem error. Aborting.",
+    "retrying_next_client": "Retrying with next client...",
+    "all_clients_failed": "All clients failed.",
+
+    "smart_mode_alert": [
+        "⚠️ Platform is hiding stream details (Unknown Resolution).",
+        "Don't worry! [bold white]Smart Mode[/] is active.",
+        "The [bold green]HIGHEST QUALITY[/] available will be downloaded automatically."
+    ],
+    "standard_client_name": "Standard (Native)",
+    "client_attempt_failed": "⚠ {client} failed: {error}"
 }

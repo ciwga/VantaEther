@@ -1,6 +1,8 @@
 import re
+import json
 from pathlib import Path
 from typing import Any, Optional
+
 import vantaether.config as config
 from vantaether.utils.i18n import LanguageManager
 
@@ -10,69 +12,82 @@ _temp_lang = LanguageManager()
 
 def get_tampermonkey_script() -> str:
     """
-    Reads the JS file from assets and dynamically injects 
-    the configured server address and port.
-    """
-    path = Path(__file__).resolve().parent.parent / "assets" / "tampermonkey_script.js"
+    Reads the raw UserScript from the assets directory and dynamically injects 
+    the active server configuration (Host, Port, URL).
     
-    if path.exists():
-        raw_content = path.read_text(encoding="utf-8")
+    Returns:
+        str: The fully configured JavaScript code ready for installation.
+    """
+    try:
+        # Resolve path relative to this file
+        path = Path(__file__).resolve().parent.parent / "assets" / "tampermonkey_script.js"
         
-        injected_content = raw_content.replace("{{SERVER_HOST}}", config.SERVER_HOST)
-        injected_content = injected_content.replace("{{SERVER_URL}}", config.SERVER_URL)
-        injected_content = injected_content.replace("{{SERVER_PORT}}", str(config.SERVER_PORT))
+        if path.exists():
+            raw_content = path.read_text(encoding="utf-8")
+            
+            # Dynamic Injection
+            injected_content = raw_content.replace("{{SERVER_HOST}}", config.SERVER_HOST)
+            injected_content = injected_content.replace("{{SERVER_URL}}", config.SERVER_URL)
+            injected_content = injected_content.replace("{{SERVER_PORT}}", str(config.SERVER_PORT))
+            
+            return injected_content
+            
+        return _temp_lang.get("script_file_error", path=path)
         
-        return injected_content
-        
-    return _temp_lang.get("script_not_found")
+    except Exception as e:
+        return _temp_lang.get("script_read_error", error=e)
+
 
 def get_script_version() -> str:
-    """Extracts the version number directly from the UserScript header.
-
-    This function parses the script content using a regex designed to be tolerant
-    of variable whitespace between the comment markers and the version tag.
-
-    Returns:
-        str: The extracted version number (e.g., '3.0') if found,
-             otherwise returns '?.?'.
     """
-    content: Optional[str] = get_tampermonkey_script()
+    Extracts the version number directly from the UserScript header metadata.
+    
+    Returns:
+        str: The version string (e.g. '3.0') or '?.?' if parsing fails.
+    """
+    content: str = get_tampermonkey_script()
 
-    if not content:
-        return "?.?"
+    # Regex to find @version tag with tolerance for whitespace
+    version_pattern = r"//\s*@version\s+([^\s]+)"
+    match = re.search(version_pattern, content)
 
-    version_pattern: str = r"//\s*@version\s+([^\s]+)"
+    return match.group(1) if match else "?.?"
 
-    rmatch: Optional[re.Match] = re.search(version_pattern, content)
 
-    return rmatch.group(1) if rmatch else "?.?"
-
-def render_html_page(lang_manager: Any) -> str:
-    """Renders the HTML page with localized strings and injected script content.
+def render_html_page(lang_manager: LanguageManager) -> str:
+    """
+    Generates the complete HTML dashboard for the user.
+    
+    Uses robust JSON serialization for injecting Python strings into JavaScript
+    to prevent syntax errors caused by quotes or special characters in translations.
 
     Args:
-        lang_manager: An instance of LanguageManager containing translation logic.
+        lang_manager: The language manager instance for localization.
 
     Returns:
-        str: The complete, localized HTML document string.
+        str: The rendered HTML document.
     """
-    # Helper lambda to shorten calls and improve readability within f-strings
     t = lang_manager.get
     
-    # Get the dynamic version from the actual JS file
-    script_ver: str = get_script_version()
-    script_content: str = get_tampermonkey_script()
+    script_ver = get_script_version()
+    script_content = get_tampermonkey_script()
 
-    # Format the title with the version
+    # Safe Title Formatting
     raw_title_fmt = t('html_script_title')
     try:
         script_title = raw_title_fmt.format(version=script_ver)
     except (KeyError, ValueError):
-        # Fallback if format placeholder {version} is missing in JSON or invalid
         script_title = f"{raw_title_fmt} (v{script_ver})"
 
-    # HTML Template Construction
-    return f"""
+    # --- SAFE JAVASCRIPT VARS ---
+    js_alert_copied = json.dumps(t('html_copied_alert'))
+    js_prefix = json.dumps(t('html_js_videos_prefix'))
+    js_vid_cap = json.dumps(t('html_js_video_captured'))
+    js_sub_cap = json.dumps(t('html_js_subtitle_captured'))
+    js_conn_lost = json.dumps(t('sse_connection_lost'))
+
+    # --- HTML STRUCTURE ---
+    html = f"""
 <!DOCTYPE html>
 <html lang="{getattr(lang_manager, 'lang_code', 'en')}">
 <head>
@@ -80,56 +95,122 @@ def render_html_page(lang_manager: Any) -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{t('html_page_title')}</title>
     <style>
-        body {{ background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', 'Monaco', monospace; padding: 20px; text-align: center; }}
-        h1 {{ color: #00ff41; margin-bottom: 30px; letter-spacing: 1px; }}
-        h3 {{ color: #79c0ff; }}
-        .container {{ border: 1px solid #30363d; padding: 20px; background: #161b22; margin: 0 auto; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }}
-        textarea {{ width: 100%; height: 200px; background: #0d1117; color: #79c0ff; border: 1px solid #30363d; padding: 10px; border-radius: 4px; resize: none; font-family: inherit; font-size: 12px; }}
+        :root {{
+            --bg-dark: #0d1117;
+            --bg-panel: #161b22;
+            --border: #30363d;
+            --text-main: #c9d1d9;
+            --text-accent: #58a6ff;
+            --success: #238636;
+            --success-hover: #2ea043;
+            --primary: #1f6feb;
+            --primary-hover: #388bfd;
+        }}
+        body {{ 
+            background-color: var(--bg-dark); 
+            color: var(--text-main); 
+            font-family: 'Segoe UI', 'Roboto', monospace; 
+            padding: 20px; 
+            text-align: center; 
+        }}
+        h1 {{ color: #00ff41; margin-bottom: 20px; letter-spacing: 1px; font-family: monospace; }}
+        h3 {{ color: var(--text-accent); margin-top: 0; }}
         
-        .btn-group {{ display: flex; gap: 10px; margin-top: 15px; }}
+        .container {{ 
+            border: 1px solid var(--border); 
+            padding: 25px; 
+            background: var(--bg-panel); 
+            margin: 0 auto; 
+            max-width: 800px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4); 
+        }}
         
-        button {{ flex: 1; padding: 15px; border: none; cursor: pointer; font-weight: bold; font-size: 16px; border-radius: 4px; transition: all 0.2s; color: #fff; }}
+        textarea {{ 
+            width: 100%; 
+            height: 200px; 
+            background: #090c10; 
+            color: #79c0ff; 
+            border: 1px solid var(--border); 
+            padding: 12px; 
+            border-radius: 6px; 
+            resize: none; 
+            font-family: 'Consolas', monospace; 
+            font-size: 13px; 
+            box-sizing: border-box;
+        }}
+        textarea:focus {{ outline: 1px solid var(--text-accent); }}
         
-        .btn-copy {{ background: #238636; border: 1px solid rgba(240,246,252,0.1); }}
-        .btn-copy:hover {{ background: #2ea043; transform: translateY(-1px); }}
+        .btn-group {{ display: flex; gap: 15px; margin-top: 20px; }}
         
-        .btn-install {{ background: #1f6feb; border: 1px solid rgba(240,246,252,0.1); }}
-        .btn-install:hover {{ background: #388bfd; transform: translateY(-1px); }}
+        button {{ 
+            flex: 1; 
+            padding: 14px; 
+            border: 1px solid rgba(240,246,252,0.1); 
+            cursor: pointer; 
+            font-weight: 600; 
+            font-size: 15px; 
+            border-radius: 6px; 
+            transition: all 0.2s; 
+            color: #fff; 
+        }}
         
-        .instructions {{ text-align: left; margin: 20px 0; line-height: 1.6; border-top: 1px solid #30363d; border-bottom: 1px solid #30363d; padding: 20px 0; }}
-        .status-box {{ font-size: 1.2em; color: #e3b341; margin-top: 30px; padding: 15px; border: 1px dashed #30363d; background: #0d1117; border-radius: 6px; }}
-        .step {{ font-weight: bold; color: #ffffff; margin-bottom: 4px; }}
+        .btn-copy {{ background: var(--success); }}
+        .btn-copy:hover {{ background: var(--success-hover); transform: translateY(-1px); }}
+        
+        .btn-install {{ background: var(--primary); }}
+        .btn-install:hover {{ background: var(--primary-hover); transform: translateY(-1px); }}
+        
+        .instructions {{ 
+            text-align: left; 
+            margin: 25px 0; 
+            line-height: 1.6; 
+            border-top: 1px solid var(--border); 
+            border-bottom: 1px solid var(--border); 
+            padding: 20px 5px;
+            font-size: 15px;
+        }}
+        
+        .step {{ font-weight: bold; color: #fff; margin-bottom: 2px; margin-top: 12px; }}
+        .step:first-child {{ margin-top: 0; }}
+        
+        .status-box {{ 
+            font-size: 1.1em; 
+            color: #8b949e; 
+            margin-top: 30px; 
+            padding: 15px; 
+            border: 1px dashed var(--border); 
+            background: var(--bg-panel); 
+            border-radius: 6px; 
+            font-family: monospace;
+            transition: all 0.3s ease;
+        }}
         
         a.install-link {{ text-decoration: none; display: flex; flex: 1; }}
-        
-        /* Scrollbar styling for textarea */
-        textarea::-webkit-scrollbar {{ width: 10px; }}
-        textarea::-webkit-scrollbar-track {{ background: #0d1117; }}
-        textarea::-webkit-scrollbar-thumb {{ background: #30363d; border-radius: 5px; }}
-        textarea::-webkit-scrollbar-thumb:hover {{ background: #58a6ff; }}
     </style>
 </head>
 <body>
     <h1>{t('html_header')}</h1>
     
     <div class="container">
-        <!-- Display Title with Version -->
         <h3>{script_title}</h3>
         
         <div class="instructions">
-            <div class="step">{t('html_step1')}</div>
-            {t('html_step1_desc')}<br><br>
-            <div class="step">{t('html_step2')}</div>
-            {t('html_step2_desc')}<br><br>
-            <div class="step">{t('html_step3')}</div>
-            {t('html_step3_desc')}<br><br>
-            <div class="step">{t('html_step4')}</div>
-            {t('html_step4_desc')}<br><br>
-            <div class="step">{t('html_step5')}</div>
-            {t('html_step5_desc')}
+            <div class="step">1. {t('html_step1')}</div>
+            <span style="color: #8b949e">{t('html_step1_desc')}</span>
+            
+            <div class="step">2. {t('html_step2')}</div>
+            <span style="color: #8b949e">{t('html_step2_desc')}</span>
+            
+            <div class="step">3. {t('html_step3')}</div>
+            <span style="color: #8b949e">{t('html_step3_desc')}</span>
+            
+            <div class="step">4. {t('html_step4')}</div>
+            <span style="color: #8b949e">{t('html_step4_desc')}</span>
+            
+            <div class="step">5. {t('html_step5')}</div>
+            <span style="color: #8b949e">{t('html_step5_desc')}</span>
         </div>
-
-        <h3>{script_title}</h3> 
         
         <textarea id="code" readonly>{script_content}</textarea>
         
@@ -151,21 +232,18 @@ def render_html_page(lang_manager: Any) -> str:
         function copyToClipboard() {{
             const copyText = document.getElementById('code');
             copyText.select();
-            copyText.setSelectionRange(0, 99999); // For mobile devices
+            copyText.setSelectionRange(0, 99999);
             
-            // Modern clipboard API usage
             if (navigator.clipboard && navigator.clipboard.writeText) {{
                 navigator.clipboard.writeText(copyText.value)
-                    .then(() => alert('{t('html_copied_alert')}'))
+                    .then(() => alert({js_alert_copied}))
                     .catch(err => console.error('Failed to copy: ', err));
             }} else {{
-                // Fallback for older browsers / non-secure contexts
                 document.execCommand('copy');
-                alert('{t('html_copied_alert')}');
+                alert({js_alert_copied});
             }}
         }}
 
-        // Server-Sent Events (SSE) for Real-time Updates
         const evtSource = new EventSource("/stream");
         
         evtSource.onmessage = function(event) {{
@@ -175,14 +253,15 @@ def render_html_page(lang_manager: Any) -> str:
                 const subCount = d.sub_count || 0;
                 
                 if(videoCount > 0){{
-                    let msg = "{t('html_js_videos_prefix')}" + videoCount + " {t('html_js_video_captured')}";
-                    if(subCount > 0) msg += " | " + subCount + " {t('html_js_subtitle_captured')}";
+                    let msg = {js_prefix} + " " + videoCount + " " + {js_vid_cap};
+                    if(subCount > 0) msg += " | " + subCount + " " + {js_sub_cap};
                     
                     const el = document.getElementById('status');
                     el.innerText = msg;
                     el.style.color = "#00ff41";
                     el.style.borderColor = "#00ff41";
                     el.style.borderStyle = "solid";
+                    el.style.backgroundColor = "rgba(0, 255, 65, 0.05)";
                 }}
             }} catch(e) {{
                 console.error("Error parsing SSE data", e);
@@ -190,10 +269,10 @@ def render_html_page(lang_manager: Any) -> str:
         }};
         
         evtSource.onerror = function() {{
-            console.warn("{t('sse_connection_lost')}");
-            // EventSource usually auto-reconnects, no manual logic needed unless complex handling required
+            console.warn({js_conn_lost});
         }};
     </script>
 </body>
 </html>
 """
+    return html
