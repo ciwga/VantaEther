@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Union, List
 
+import requests
 from rich.console import Console
 from rich.progress import (
     Progress,
@@ -22,12 +23,16 @@ lang = LanguageManager()
 
 
 class StreamMerger:
-    """Handles logic for merging video, audio, and subtitle streams."""
+    """
+    Handles complex logic for merging video, audio, and subtitle streams using FFmpeg.
+    Ensures safe process execution and accurate progress tracking.
+    """
 
     @staticmethod
     def _parse_time_str(time_str: str) -> float:
         """
         Parses FFmpeg time string (HH:MM:SS.ms) into total seconds.
+        Handles variances in FFmpeg output formatting.
 
         Args:
             time_str: Time string like '00:03:45.23'
@@ -36,10 +41,13 @@ class StreamMerger:
             float: Total seconds.
         """
         try:
-            h, m, s = time_str.split(':')
-            return int(h) * 3600 + int(m) * 60 + float(s)
-        except ValueError:
-            return 0.0
+            parts = time_str.split(':')
+            if len(parts) == 3:
+                h, m, s = parts
+                return int(h) * 3600 + int(m) * 60 + float(s)
+        except (ValueError, TypeError):
+            pass
+        return 0.0
 
     @staticmethod
     def process_external_sub_sync(
@@ -51,21 +59,18 @@ class StreamMerger:
         audio_file: Optional[Union[Path, str]] = None,
     ) -> None:
         """
-        Merges external subtitles AND/OR orphaned audio files using FFmpeg.
+        Orchestrates the merging of external subtitles and/or orphaned audio files.
         
         Args:
-            url: Subtitle URL (optional).
-            fname: Base filename (Full absolute path without extension).
-            mode: Embedding mode ('embed_mp4', 'embed_mkv', etc.).
-            headers: HTTP headers for downloading subtitle.
-            video_ext: The extension of the detected video part.
-            audio_file: Path object or string path to the orphaned audio file (optional).
+            url: URL of the subtitle file (optional).
+            fname: Base absolute filename path without extension.
+            mode: Muxing mode ('embed_mp4', 'embed_mkv', etc.).
+            headers: HTTP headers for secure requests.
+            video_ext: Extension of the main video file.
+            audio_file: Path to the separate audio file (optional).
         """
-        import requests
-
         if audio_file:
             audio_file = Path(audio_file)
-            # Safety check: Do not attempt to merge partial files
             if ".part" in audio_file.name or not audio_file.exists():
                 console.print(f"[bold red]{lang.get('invalid_audio_file', audio_file=audio_file)}[/]")
                 audio_file = None
@@ -78,143 +83,144 @@ class StreamMerger:
         final_sub: Optional[str] = None
 
         try:
-            # Subtitle Download
+            # 1. Subtitle Download Phase
             if url:
-                r = requests.get(url, headers=headers, verify=False)
-                if r.status_code == 200:
+                try:
+                    r = requests.get(url, headers=headers, timeout=15)
+                    r.raise_for_status()
+                    
                     ext = "vtt" if ".vtt" in url else "srt"
-                    raw = f"{fname}_ext.{ext}"
-                    with open(raw, "wb") as f:
+                    raw_sub_path = f"{fname}_ext.{ext}"
+                    
+                    with open(raw_sub_path, "wb") as f:
                         f.write(r.content)
-                    final_sub = raw
+                    
+                    final_sub = raw_sub_path
+                    
                     if ext == "vtt":
                         srt_name = f"{fname}.srt"
                         subprocess.run(
-                            ["ffmpeg", "-y", "-i", raw, srt_name], capture_output=True
+                            ["ffmpeg", "-y", "-v", "quiet", "-i", raw_sub_path, srt_name], 
+                            check=False
                         )
                         final_sub = srt_name
-                        if Path(raw).exists():
-                            Path(raw).unlink()
+                        StreamMerger._safe_unlink(raw_sub_path)
+                        
+                except Exception as e:
+                    console.print(f"[red]{lang.get('subtitle_download_failed', error=e)}[/]")
 
-            # Setup Merge
-            # Construct the theoretical video file path first
+            # 2. File Discovery Phase
             video_file = Path(f"{fname}.{video_ext}")
             
-            # Re-verify existence using pathlib glob
+            # Fallback discovery if exact match fails
             if not video_file.exists():
                 f_path = Path(fname)
                 search_dir = f_path.parent
                 stem_name = f_path.name
 
-                candidates = []
                 if search_dir.exists():
                     candidates = list(search_dir.glob(f"{stem_name}.*"))
-                
-                valid = [
-                    f for f in candidates
-                    if not f.suffix in [".json", ".srt", ".vtt", ".part", ".ytdl"]
-                    and ".part" not in f.name
-                    and ".audio." not in f.name # Exclude our explicit audio files from being detected as video
-                ]
-                if valid:
-                    # Pick largest as video (safest assumption for video vs thumbnail/logs)
-                    video_file = max(valid, key=lambda p: p.stat().st_size)
+                    valid = [
+                        f for f in candidates
+                        if f.suffix not in [".json", ".srt", ".vtt", ".part", ".ytdl"]
+                        and ".part" not in f.name
+                        and ".audio." not in f.name 
+                        and f != audio_file
+                    ]
+                    if valid:
+                        video_file = max(valid, key=lambda p: p.stat().st_size)
 
+            if not video_file.exists():
+                console.print(f"[bold red]{lang.get('merge_video_not_found', path=video_file)}[/]")
+                return
+
+            # 3. FFmpeg Command Construction
             target_output_ext = "mkv" if "mkv" in mode else "mp4"
             output_file = Path(f"{fname}_final.{target_output_ext}")
 
             cmd = ["ffmpeg", "-y", "-i", str(video_file)]
 
-            # Input Audio (Input #1)
             if audio_file:
                 cmd.extend(["-i", str(audio_file)])
 
-            # Input Sub (Input #2 or #1)
             if final_sub:
                 cmd.extend(["-i", final_sub])
 
-            # --- MAPPING ---
-            cmd.extend(["-map", "0:v"])  # Video from input 0
+            # Stream Mapping
+            cmd.extend(["-map", "0:v"])  # Always map video from first input
 
             if audio_file:
-                # If the 'audio' file is actually a video without audio tracks (user error),
-                # FFmpeg will ignore this map instead of crashing.
-                cmd.extend(["-map", "1:a?"])  
+                cmd.extend(["-map", "1:a?"]) # Audio from second input
             else:
-                cmd.extend(["-map", "0:a?"]) # Audio from input 0 (if valid)
+                cmd.extend(["-map", "0:a?"]) # Audio from first input
 
             if final_sub:
-                sub_idx = "2" if audio_file else "1"
-                cmd.extend(["-map", f"{sub_idx}:0"])
+                sub_input_idx = "2" if audio_file else "1"
+                cmd.extend(["-map", f"{sub_input_idx}:0"])
 
-            # --- ENCODING ---
+            # Encoding Options
             if mode == "embed_mp4":
-                cmd.extend(
-                    [
-                        "-c:v", "copy",
-                        "-c:a", "aac", "-b:a", "192k",
-                        "-ac", "2",
-                        "-c:s", "mov_text",
-                    ]
-                )
+                cmd.extend([
+                    "-c:v", "copy",
+                    "-c:a", "aac", "-b:a", "192k", "-ac", "2",
+                    "-c:s", "mov_text"
+                ])
             elif mode == "embed_mkv":
+                cmd.extend(["-c:v", "copy"])
+                # Re-encode audio to AAC if merging separate file, else copy
                 if audio_file:
-                    cmd.extend(["-c:v", "copy", "-c:a", "aac", "-c:s", "srt"])
+                    cmd.extend(["-c:a", "aac"]) 
                 else:
-                    cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "srt"])
+                    cmd.extend(["-c:a", "copy"])
+                cmd.extend(["-c:s", "srt"])
             else:
                 cmd.extend(["-c:v", "copy", "-c:a", "copy"])
 
             cmd.append(str(output_file))
+            
+            # Compatibility flags
             cmd.insert(1, "-strict")
             cmd.insert(2, "experimental")
-            
-            # Regex patterns for parsing FFmpeg output
-            duration_pattern = re.compile(r"Duration:\s*(\d{2}:\d{2}:\d{2}\.\d+)")
-            time_pattern = re.compile(r"time=(\d{2}:\d{2}:\d{2}\.\d+)")
+            cmd.insert(3, "-v")
+            cmd.insert(4, "info") # Needed to parse progress
 
-            # Use Popen to read stdout line by line for progress
+            # 4. Execution & Progress Monitoring
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for parsing
+                stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 encoding='utf-8',
                 errors='replace'
             )
 
+            # Regex for progress parsing
+            duration_pattern = re.compile(r"Duration:\s*(\d{2}:\d{2}:\d{2}\.\d+)")
+            time_pattern = re.compile(r"time=(\d{2}:\d{2}:\d{2}\.\d+)")
+
             total_duration_secs: Optional[float] = None
-            log_buffer: List[str] = [] # Keep last lines for error reporting
+            log_buffer: List[str] = []
 
             with Progress(
                 SpinnerColumn("dots", style="bold magenta"),
                 TextColumn("[bold cyan]{task.description}"),
-                BarColumn(
-                    bar_width=None,
-                    style="dim white",
-                    complete_style="bold green",
-                    finished_style="bold green"
-                ),
+                BarColumn(bar_width=None, style="dim white", complete_style="bold green"),
                 TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                "•",
-                TimeElapsedColumn(),
-                "•",
-                TimeRemainingColumn(),
+                "•", TimeElapsedColumn(), "•", TimeRemainingColumn(),
                 console=console
             ) as progress:
                 
-                # Start with indeterminate task (total=None)
                 task_id = progress.add_task(f"[yellow]{lang.get('ffmpeg_processing')}[/]", total=None)
 
                 if process.stdout:
                     for line in process.stdout:
                         log_buffer.append(line)
-                        if len(log_buffer) > 50: # Keep only recent logs to save memory
+                        if len(log_buffer) > 20: 
                             log_buffer.pop(0)
 
                         line = line.strip()
                         
-                        # 1. Attempt to find Total Duration
+                        # Capture Duration
                         if total_duration_secs is None:
                             d_match = duration_pattern.search(line)
                             if d_match:
@@ -222,7 +228,7 @@ class StreamMerger:
                                 if total_duration_secs > 0:
                                     progress.update(task_id, total=total_duration_secs)
 
-                        # 2. Attempt to find Current Time
+                        # Capture Progress
                         if total_duration_secs:
                             t_match = time_pattern.search(line)
                             if t_match:
@@ -231,34 +237,34 @@ class StreamMerger:
             
             return_code = process.wait()
 
-            if return_code == 0 and output_file.exists():
-                # Only delete parts if merge was successful
-                if video_file.exists() and video_file != output_file:
-                    try:
-                        video_file.unlink()
-                    except OSError: pass
-                if audio_file and audio_file.exists():
-                    try:
-                        audio_file.unlink()
-                    except OSError: pass
-
-                final_name = Path(f"{fname}.{target_output_ext}")
-                if final_name.exists():
-                    try:
-                        final_name.unlink()
-                    except OSError: pass
+            # 5. Cleanup Phase
+            if return_code == 0 and output_file.exists() and output_file.stat().st_size > 0:
+                StreamMerger._safe_unlink(video_file)
+                StreamMerger._safe_unlink(audio_file)
                 
-                output_file.rename(final_name)
+                final_path = Path(f"{fname}.{target_output_ext}")
+                StreamMerger._safe_unlink(final_path)
+                
+                output_file.rename(final_path)
+                StreamMerger._safe_unlink(final_sub)
 
-                if final_sub and Path(final_sub).exists():
-                    try:
-                        Path(final_sub).unlink()
-                    except OSError: pass
-
-                console.print(f"[bold green]{lang.get('muxing_complete', filename=final_name)}[/]")
+                console.print(f"[bold green]{lang.get('muxing_complete', filename=final_path.name)}[/]")
             else:
-                error_log = "".join(log_buffer)
-                console.print(f"[bold red]{lang.get('muxing_error')}[/]\n[dim]{error_log}[/]")
+                # Failure
+                console.print(f"[bold red]{lang.get('muxing_error')}[/]")
+                if log_buffer:
+                    console.print(f"[dim]{lang.get('last_log_label', log=log_buffer[-1])}[/]")
 
         except Exception as e:
             console.print(f"[red]{lang.get('merge_error', error=str(e))}[/]")
+
+    @staticmethod
+    def _safe_unlink(path: Union[Path, str, None]) -> None:
+        """Helper to safely delete files suppressing errors."""
+        if path:
+            try:
+                p = Path(path)
+                if p.exists():
+                    p.unlink()
+            except OSError:
+                pass

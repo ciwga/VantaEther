@@ -1,8 +1,10 @@
+from typing import List, Dict, Any, Tuple
+
 from rich.table import Table
 from rich.panel import Panel
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
-from typing import List, Dict, Any, Tuple
+
 from vantaether.utils.i18n import LanguageManager
 
 
@@ -12,30 +14,30 @@ lang = LanguageManager()
 
 class PlaylistManager:
     """
-    Handles interactions related to playlists, including displaying contents
-    and capturing user selection for bulk or specific downloads.
+    Handles user interaction for playlist selection.
+    Provides batch processing options and safe input handling.
     """
 
     def process_playlist_selection(
         self, info: Dict[str, Any], audio_only: bool
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """
-        Displays the playlist entries and prompts the user for action.
+        Displays playlist contents and captures user intent (Bulk vs Single).
 
         Args:
-            info (Dict[str, Any]): The playlist metadata extracted by yt-dlp.
-            audio_only (bool): Flag indicating if audio-only mode is active.
+            info: Playlist metadata from yt-dlp.
+            audio_only: Whether the user requested audio-only mode.
 
         Returns:
-            Tuple[List[Dict[str, Any]], bool]: 
-                - A list of entries (videos) to be downloaded.
-                - A boolean flag indicating if 'force_best' mode should be used.
+            Tuple containing:
+            - List of selected video entries.
+            - Boolean flag for 'force_best' mode.
         """
         entries = list(info.get("entries", []))
         total_videos = len(entries)
-        playlist_title = info.get("title", lang.get("unknown_playlist", default="Unknown Playlist"))
+        playlist_title = info.get("title") or lang.get("playlist_unknown_title")
 
-        # 1. Display Header
+        # 1. UI: Header
         console.print(
             Panel(
                 f"[bold white]{lang.get('playlist_detected', count=total_videos)}[/]\n"
@@ -45,30 +47,35 @@ class PlaylistManager:
             )
         )
 
-        # 2. Display Table
+        # 2. UI: Content Table (Limited to first 20 items to prevent spam)
         table = Table(show_header=True, header_style="bold green")
-        table.add_column(lang.get("table_id"), style="dim", width=4)
+        table.add_column(lang.get("table_id"), style="dim", width=4, justify="center")
         table.add_column(lang.get("table_title"))
-        table.add_column(lang.get("table_url"), style="cyan")
+        table.add_column("ID", style="cyan")
 
-        # Limit display to avoid flooding the terminal
         display_limit = 20
+        # Safe slicing ensures no error even if list is small
         for idx, entry in enumerate(entries[:display_limit], 1):
-            title = entry.get("title", lang.get("unknown", default="Unknown"))
+            if not entry: continue # Skip None entries
+            
+            title = entry.get("title") or lang.get("unknown")
             vid_id = entry.get("id", "")
             table.add_row(str(idx), title, vid_id)
 
         if total_videos > display_limit:
+            remaining = total_videos - display_limit
             table.add_row(
-                "...", f"... and {total_videos - display_limit} more", "..."
+                "...", 
+                f"[dim]{lang.get('playlist_more_items', count=remaining)}[/]", 
+                "..."
             )
 
         console.print(table)
 
-        # 3. Prompt User Options
+        # 3. User Interaction
         console.print(f"\n[bold yellow]{lang.get('options')}:[/]")
-        console.print(f"  [bold white]ID[/] {lang.get('menu_specific')}")
-        console.print(f"  [bold white]all[/] {lang.get('menu_all')}")
+        console.print(f"  [bold white]ID[/]  : {lang.get('menu_specific')}")
+        console.print(f"  [bold white]all[/] : {lang.get('menu_all')}")
 
         choice = Prompt.ask(lang.get("command_prompt"), default="all")
         
@@ -76,29 +83,31 @@ class PlaylistManager:
         force_best = False
 
         if choice.lower() == "all":
-            # Bulk Mode
+            # Bulk Download Mode
             if Confirm.ask(
                 lang.get("confirm_bulk_download", count=total_videos), default=True
             ):
                 if not audio_only:
+                    # For video bulk, ask quality preference once
                     console.print(lang.get("bulk_mode_prompt"))
                     mode = Prompt.ask(
                         lang.get("bulk_mode_choice"), choices=["1", "2"], default="1"
                     )
-                    force_best = mode == "1"
+                    force_best = (mode == "1")
                 else:
-                    force_best = True  # Always best for bulk audio to avoid spamming prompts
+                    # Audio bulk is always 'best' to avoid 100 popups
+                    force_best = True
                 
                 selected_entries = entries
 
         elif choice.isdigit():
-            # Specific ID Mode
+            # Single Item Selection Mode
             idx = int(choice) - 1
             if 0 <= idx < total_videos:
                 selected_entries = [entries[idx]]
             else:
-                console.print(f"[red]{lang.get('invalid_id')}[/]")
+                console.print(f"[bold red]{lang.get('invalid_id')}[/]")
         else:
-            console.print(f"[red]{lang.get('cancelled')}[/]")
+            console.print(f"[yellow]{lang.get('cancelled')}[/]")
 
         return selected_entries, force_best
