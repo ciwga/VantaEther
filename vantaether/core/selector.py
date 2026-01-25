@@ -24,7 +24,7 @@ class FormatSelector:
         Displays available video formats and prompts the user to select one.
         
         Args:
-            formats: Raw format list from yt-dlp.
+            formats: Raw format list from yt-dlp or internal JSON parser.
 
         Returns:
             Selected format dict or None.
@@ -32,11 +32,12 @@ class FormatSelector:
         if not formats:
             return None
 
-        # Filter valid video formats (must have height or be known video codec)
+        # Filter valid video formats (must have height or be known video codec or come from JSON parser)
         # Sort by resolution (Height) descending, then Bitrate descending
+        # Modified for JSON API Support: Handles cases where 'vcodec' or 'tbr' is missing safely.
         video_formats = sorted(
-            [f for f in formats if f.get("height") or f.get("vcodec") != "none"],
-            key=lambda x: (x.get("height", 0) or 0, x.get("tbr", 0) or 0),
+            [f for f in formats if f.get("height") or f.get("vcodec", "none") != "none" or f.get("format_note")],
+            key=lambda x: (x.get("height", 0) or 0, x.get("tbr", 0) or 0, x.get("filesize", 0) or 0),
             reverse=True,
         )
 
@@ -46,12 +47,15 @@ class FormatSelector:
         
         for f in video_formats:
             height = f.get("height")
-            res_str = f"{height}p" if height else lang.get("unknown")
+            # Fallback to format_note (often contains label like "1080p" in JSON apis)
+            res_str = f"{height}p" if height else (f.get("format_note") or lang.get("unknown"))
             
-            # If resolution is identical, prefer the one with higher bitrate (already sorted)
-            if res_str not in seen:
+            # Use URL as part of uniqueness check if format_id is generic
+            unique_key = f"{res_str}_{f.get('filesize')}"
+            
+            if unique_key not in seen:
                 unique_fmts.append(f)
-                seen.add(res_str)
+                seen.add(unique_key)
 
         if not unique_fmts:
             return None
@@ -60,6 +64,7 @@ class FormatSelector:
         table = Table(title=lang.get("quality_options"), header_style="bold magenta")
         table.add_column(lang.get("table_id"), justify="center", no_wrap=True)
         table.add_column(lang.get("resolution"), no_wrap=True)
+        table.add_column(lang.get("size"), no_wrap=True)
         table.add_column(lang.get("table_bitrate"), no_wrap=True)
         table.add_column(lang.get("codec"), no_wrap=True, max_width=12, overflow="ellipsis")
         table.add_column(lang.get("table_ext"), no_wrap=True)
@@ -67,13 +72,20 @@ class FormatSelector:
 
         for idx, f in enumerate(unique_fmts, 1):
             # Audio Status check
-            has_audio = f.get("acodec") != "none" and f.get("acodec") is not None
+            # For JSON APIs, assume audio exists if codec is unknown to prevent misleading "Video Only" warning
+            has_audio = (f.get("acodec") != "none" and f.get("acodec") is not None) or \
+                        (f.get("vcodec") == "unknown")
+            
             audio_status = lang.get("exists") if has_audio else lang.get("video_only")
             
             # Bitrate formatting
             tbr = f.get("tbr")
             tbr_str = f"{int(tbr)}k" if tbr else "~"
             
+            # Size formatting
+            fsize = f.get("filesize")
+            size_str = f"{int(fsize / 1024 / 1024)} MB" if fsize else "~"
+
             # Codec formatting
             vcodec = f.get("vcodec", lang.get("unknown"))
             if vcodec == "none": vcodec = lang.get("codec_images")
@@ -81,6 +93,7 @@ class FormatSelector:
             table.add_row(
                 str(idx),
                 f"{f.get('height', '?')}p",
+                size_str,
                 tbr_str,
                 vcodec,
                 f.get("ext", "mp4"),

@@ -1,10 +1,12 @@
+import re
 import sys
 import time
+import json
 import threading
 import traceback
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Optional, Dict, Any, Tuple, List, Set
+from typing import Optional, Dict, Any, Tuple, List, Set, Union
 
 import requests
 import yt_dlp
@@ -311,6 +313,85 @@ class VantaEngine:
             console.print(f"[bold red]{lang.get('critical_error')}[/] {lang.get('unhandled_ui_exception')} {e}")
             return None
 
+    def _recursive_find_videos(self, data: Union[Dict, List, Any], found_videos: List[Dict]) -> None:
+        """
+        Recursively searches for video-like objects in a JSON structure.
+        Look for keys like 'url', 'file', 'src' and associated metadata.
+
+        Args:
+            data: The JSON data to search.
+            found_videos: List to append found formats to.
+        """
+        if isinstance(data, dict):
+            # Check if this dict looks like a video object
+            url_candidate = data.get("url") or data.get("file") or data.get("src")
+            if url_candidate and isinstance(url_candidate, str):
+                # Simple check for common video extensions or keywords
+                if re.search(r'\.(mp4|mkv|webm|m3u8)|/video/', url_candidate):
+                    
+                    label = data.get("label") or data.get("quality") or data.get("res") or "unknown"
+                    size = data.get("size") or data.get("filesize") or 0
+                    
+                    # Try to extract height from label (e.g., "1080p" -> 1080)
+                    height = 0
+                    if label != "unknown":
+                        match = re.search(r'(\d{3,4})', str(label))
+                        if match:
+                            height = int(match.group(1))
+
+                    found_videos.append({
+                        "format_id": f"json_{label}_{len(found_videos)}",
+                        "url": url_candidate,
+                        "ext": "mp4",
+                        "vcodec": "unknown",
+                        "acodec": "unknown",
+                        "height": height,
+                        "filesize": size if isinstance(size, int) else 0,
+                        "tbr": 0, # Usually unknown in simple JSON APIs
+                        "format_note": str(label)
+                    })
+            
+            # Recurse into values
+            for v in data.values():
+                self._recursive_find_videos(v, found_videos)
+        
+        elif isinstance(data, list):
+            for item in data:
+                self._recursive_find_videos(item, found_videos)
+
+    def _process_json_api(self, target: Dict[str, Any], headers: Dict) -> Optional[List[Dict]]:
+        """
+        Attempts to fetch and parse the target URL as a JSON API to find video links.
+
+        Args:
+            target: The captured target metadata.
+            headers: Headers for the request.
+
+        Returns:
+            Optional[List[Dict]]: A list of yt-dlp compatible formats if found, else None.
+        """
+        try:
+            console.print(f"[cyan]{lang.get('json_api_scan_start')}[/]")
+            resp = requests.get(target["url"], headers=headers, timeout=10)
+            
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                return None
+
+            found_formats = []
+            self._recursive_find_videos(data, found_formats)
+
+            if found_formats:
+                console.print(f"[green]{lang.get('json_api_scan_success', count=len(found_formats))}[/]")
+                return found_formats
+            
+            return None
+
+        except Exception as e:
+            console.print(f"[dim red]{lang.get('json_api_scan_failed', error=e)}[/]")
+            return None
+
     def analyze_and_select(
         self, target: Dict[str, Any]
     ) -> Tuple[Optional[Dict], Optional[str], Optional[Dict], str, str, bool]:
@@ -342,7 +423,23 @@ class VantaEngine:
 
         console.print(f"\n[magenta]{lang.get('analyzing')}[/]")
 
-        # Extract Info
+        # If it looks like an API, try to parse JSON directly first
+        is_api = "api" in target.get("media_type", "") or "/api/" in target["url"]
+        
+        if is_api:
+            json_formats = self._process_json_api(target, headers)
+            if json_formats:
+                # Bypass yt-dlp extraction and go straight to selection
+                selected_fmt = self.selector.select_video_format(json_formats)
+                
+                if selected_fmt:
+                    target["url"] = selected_fmt["url"]
+                    # FORCE MODE = TRUE (Since we have a direct file URL now, we skip yt-dlp format selection)
+                    return selected_fmt, None, None, "raw", c_file, True
+                else:
+                    return None, None, None, "cancel", "", False
+
+        # --- STANDARD YT-DLP EXTRACTION ---
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,

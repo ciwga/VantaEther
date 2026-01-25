@@ -143,8 +143,11 @@ class DownloadManager:
                 ydl_opts["writesubtitles"] = True
 
             success = False
+            
+            # Check if format ID is an internal JSON/Virtual ID
+            is_virtual_format = fmt and str(fmt.get("format_id", "")).startswith("json_")
 
-            if not force_mode and fmt and audio_id:
+            if not force_mode and fmt and audio_id and not is_virtual_format:
                 # Manual Split: Download Video and Audio separately, then merge by yt-dlp or manually
                 console.print(f"[cyan]{lang.get('processing_video', format_id=fmt['format_id'])}[/]")
                 opts_video = ydl_opts.copy()
@@ -169,7 +172,8 @@ class DownloadManager:
                 success = v_success and a_success
             else:
                 # Standard Auto-Merge or Simple Download
-                if force_mode:
+                if force_mode or is_virtual_format:
+                    # If it's a direct file (virtual format) or forced, let yt-dlp figure out the best single file
                     ydl_opts["format"] = "bestvideo+bestaudio/best"
                 else:
                     ydl_opts["format"] = fmt["format_id"] if fmt else "best"

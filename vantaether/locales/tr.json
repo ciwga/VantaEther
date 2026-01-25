@@ -296,5 +296,8 @@
         "Mevcut olan [bold green]EN YÜKSEK KALİTE[/] otomatik olarak indirilecek."
     ],
     "standard_client_name": "Standart (Native)",
-    "client_attempt_failed": "⚠ {client} başarısız: {error}"
+    "client_attempt_failed": "⚠ {client} başarısız: {error}",
+    "json_api_scan_start": "🔍 JSON API Tespit Edildi. İçerik taranıyor...",
+    "json_api_scan_success": "✔ JSON İçinde {count} adet video bağlantısı bulundu!",
+    "json_api_scan_failed": "❌ JSON API Tarama Hatası: {error}"
 }

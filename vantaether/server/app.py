@@ -46,6 +46,16 @@ class CapturedItem:
     ) -> None:
         """
         Initializes the captured item with timestamp.
+
+        Args:
+            url (str): The captured URL.
+            media_type (str): Type of media (e.g., video, sub, manifest).
+            source (str): Source of capture (e.g., XHR, FETCH).
+            title (Optional[str]): Page title context.
+            page (Optional[str]): Origin page URL.
+            cookies (Optional[str]): Browser cookies for auth.
+            agent (Optional[str]): User-Agent string.
+            referrer (Optional[str]): Referrer URL.
         """
         self.url = url
         self.media_type = media_type
@@ -117,6 +127,9 @@ class CaptureManager:
         """
         Internal helper: Removes the oldest items if the list exceeds the maximum size.
         This prevents memory leaks in long-running sessions.
+
+        Args:
+            target_list (List[Any]): The list to prune.
         """
         if len(target_list) > self._MAX_ITEMS:
             # Remove the oldest 10% of items (FIFO)
@@ -193,7 +206,12 @@ class CaptureManager:
         return flag
 
     def get_status(self) -> Dict[str, int]:
-        """Returns the current count of captured items safely."""
+        """
+        Returns the current count of captured items safely.
+        
+        Returns:
+            Dict[str, int]: A dictionary containing counts for videos and subs.
+        """
         with self._lock:
             # Exclude logs from the visible video count
             real_vid_count = sum(1 for v in self._videos if v.media_type != "log")
@@ -203,7 +221,12 @@ class CaptureManager:
             }
 
     def get_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Returns a thread-safe snapshot/copy of current data."""
+        """
+        Returns a thread-safe snapshot/copy of current data.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Copy of videos and subs lists.
+        """
         with self._lock:
             return {
                 "videos": [v.to_dict() for v in self._videos],
@@ -315,16 +338,13 @@ class VantaServer:
                 m_type = data.get("type", "unknown")
                 m_url = data.get("url", "no_url")
                 
-                # Truncate long URLs for display
-                disp_url = (m_url[:60] + '..') if len(m_url) > 60 else m_url
-                
                 if m_type == "log":
                     # Logs are handled differently in UI, but good to know they arrived
                     pass
                 else:
-                    # Visible feedback for valid media items
-                    color = "green" if "manifest" in m_type else "yellow"
-                    console.print(f"[dim]Recv:[/][{color}]{m_type}[/] -> {disp_url}")
+                    noisy_patterns = ["/comments/", "socket.io", "/replies", "user-profile", "related-videos"]
+                    if any(pattern in m_url for pattern in noisy_patterns):
+                         return jsonify({"status": "ignored_noise"}), 200
 
                 added = self.capture_manager.add_item(data)
                 

@@ -296,5 +296,8 @@
         "The [bold green]HIGHEST QUALITY[/] available will be downloaded automatically."
     ],
     "standard_client_name": "Standard (Native)",
-    "client_attempt_failed": "⚠ {client} failed: {error}"
+    "client_attempt_failed": "⚠ {client} failed: {error}",
+    "json_api_scan_start": "🔍 JSON API Detected. Scanning content...",
+    "json_api_scan_success": "✔ Found {count} video links in JSON!",
+    "json_api_scan_failed": "❌ JSON API Scan Error: {error}"
 }

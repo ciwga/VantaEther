@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         VantaEther Sync Agent v2.1
+// @name         VantaEther Sync Agent v2.1.1
 // @namespace    {{SERVER_URL}}/
-// @version      2.1
+// @version      2.1.1
 // @description  Combines Visual Notifications, Iframe Injection, File Sniffing and API/Embed Detection.
 // @match        *://*/*
 // @connect      {{SERVER_HOST}}
@@ -201,6 +201,7 @@
         const isPlayerApi = url.includes('/embed/') || 
                             url.includes('molystream') || 
                             /\/q\/\d+/.test(url) ||
+                            url.includes('/api/video/') ||
                             url.includes('/player/api');
 
         // Send debug log for analysis
