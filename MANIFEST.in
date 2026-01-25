@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include requirements.txt
+recursive-include vantaether/locales *.json
+recursive-include vantaether/assets *.js
