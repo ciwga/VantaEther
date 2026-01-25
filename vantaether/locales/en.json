@@ -119,7 +119,7 @@
     "exists": "✔ Exists",
     "video_only": "❌ Video Only (Merge Req.)",
     "audio_sources": "AUDIO SOURCES",
-    "audio_choice": "Audio Choice",
+    "audio_choice": "Audio Choice (e.g., 1 or 1,2 or all)",
     "audio_only_active": "⚠ Audio Only Mode Active: Extracting MP3...",
     "api_stream_warning_title": "API STREAM DETECTED",
     "api_stream_warning_body": [
@@ -134,11 +134,11 @@
     "embed_mode_prompt": [
         "1. Download (.srt convert)",
         "2. Embed (MP4)",
-        "3. Embed (MKV - Recommended)",
+        "3. Embed (MKV - Recommended for Multi-Sub/Audio)",
         "4. Raw"
     ],
     "embed_mode_choice": "Mode",
-    "download_external_sub": "Downloading External Subtitle...",
+    "download_external_sub": "Downloading External Subtitle ({lang})...",
 
     "filename_prompt": "Filename (Enter for default)",
     "filename_detected": "Detected Name: {name}",
@@ -146,14 +146,14 @@
     "download_starting": "🚀 STARTING: {filename}",
     "processing": "Processing: {filename}...",
     "processing_video": "Downloading Video Stream (ID: {format_id})...",
-    "processing_audio": "Downloading Audio Stream (ID: {format_id})...",
+    "processing_audio": "Downloading Audio Stream (ID: {format_id} | Lang: {lang})...",
     "processing_item": "Processing {index}/{total}: {title}",
     "invalid_audio_file": "Skipping merge: Audio file is incomplete or missing: {audio_file}",
     "download_success": "✔ OPERATION SUCCESSFUL",
     "download_error": "Download Error: {error}",
     "download_error_403": "❌ Download Failed (HTTP 403): Cookies or access permissions are invalid. (Try refreshing the page)",
     "download_error_drm": "❌ Download Failed (DRM): This content is DRM protected and cannot be downloaded.",
-    "manual_muxing": "Starting Manual Muxing...",
+    "manual_muxing": "Starting Multi-Stream Muxing...",
     "ffmpeg_processing": "FFmpeg Processing...",
     "muxing_complete": "✔ COMPLETED: {filename}",
     "muxing_error": "Muxing Error:",
@@ -300,5 +300,9 @@
     "client_attempt_failed": "⚠ {client} failed: {error}",
     "json_api_scan_start": "🔍 JSON API Detected. Scanning content...",
     "json_api_scan_success": "✔ Found {count} video links in JSON!",
-    "json_api_scan_failed": "❌ JSON API Scan Error: {error}"
+    "json_api_scan_failed": "❌ JSON API Scan Error: {error}",
+
+    "selection_invalid": "❌ Invalid selection! Use format 1,2,3 or 'all'.",
+    "select_subs_prompt": "Subtitle Selection (e.g., 1,3 or 'all' or 'none')",
+    "merging_multistream": "🚀 Merging Multi-Streams: {video_count} Video + {audio_count} Audio + {sub_count} Subtitle"
 }

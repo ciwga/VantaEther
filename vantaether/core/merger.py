@@ -2,7 +2,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Tuple
 
 import requests
 from rich.console import Console
@@ -24,7 +24,7 @@ lang = LanguageManager()
 
 class StreamMerger:
     """
-    Handles complex logic for merging video, audio, and subtitle streams using FFmpeg.
+    Handles complex logic for merging video, multiple audio, and multiple subtitle streams using FFmpeg.
     Ensures safe process execution and accurate progress tracking.
     """
 
@@ -51,81 +51,103 @@ class StreamMerger:
 
     @staticmethod
     def process_external_sub_sync(
-        url: Optional[str],
+        subtitle_urls: List[Dict[str, str]],  # List of {url, lang, type}
         fname: str,
         mode: str,
         headers: Dict[str, str],
         video_ext: str,
-        audio_file: Optional[Union[Path, str]] = None,
+        audio_files: List[Tuple[str, str]] = [], # List of (filepath, lang_code)
+        # Backwards compatibility arg (deprecated but kept for safety if called old way)
+        url: Optional[str] = None, 
     ) -> None:
         """
-        Orchestrates the merging of external subtitles and/or orphaned audio files.
+        Orchestrates the merging of external subtitles and multiple audio tracks.
         
         Args:
-            url: URL of the subtitle file (optional).
+            subtitle_urls: List of dicts containing 'url', 'lang', 'ext'.
             fname: Base absolute filename path without extension.
             mode: Muxing mode ('embed_mp4', 'embed_mkv', etc.).
             headers: HTTP headers for secure requests.
             video_ext: Extension of the main video file.
-            audio_file: Path to the separate audio file (optional).
+            audio_files: List of tuples (audio_file_path, language_code).
+            url: Legacy single URL support (merged into subtitle_urls if provided).
         """
-        if audio_file:
-            audio_file = Path(audio_file)
-            if ".part" in audio_file.name or not audio_file.exists():
-                console.print(f"[bold red]{lang.get('invalid_audio_file', audio_file=audio_file)}[/]")
-                audio_file = None
-
+        # --- 1. Consolidate Inputs ---
         if url:
-            console.print(f"[cyan]{lang.get('download_external_sub')}[/]")
-        elif audio_file:
-            console.print(f"[cyan]{lang.get('manual_muxing')}[/]")
+            subtitle_urls.append({"url": url, "lang": "und", "ext": "vtt"})
 
-        final_sub: Optional[str] = None
+        # Validate Audio Files
+        valid_audio_files = []
+        for a_path, a_lang in audio_files:
+            p = Path(a_path)
+            if p.exists() and ".part" not in p.name:
+                valid_audio_files.append((a_path, a_lang))
+            else:
+                 console.print(f"[bold red]{lang.get('invalid_audio_file', audio_file=a_path)}[/]")
+
+        if not subtitle_urls and not valid_audio_files:
+            return
+
+        console.print(f"[cyan]{lang.get('merging_multistream', video_count=1, audio_count=len(valid_audio_files), sub_count=len(subtitle_urls))}[/]")
+
+        temp_files_to_clean: List[str] = []
 
         try:
-            # 1. Subtitle Download Phase
-            if url:
+            # --- 2. Subtitle Download Phase ---
+            processed_subs: List[Tuple[str, str]] = [] # (filepath, lang)
+
+            for sub_info in subtitle_urls:
+                s_url = sub_info.get("url")
+                s_lang = sub_info.get("lang", "und")
+                s_ext = sub_info.get("ext", "vtt")
+                
+                if not s_url: continue
+                
                 try:
-                    r = requests.get(url, headers=headers, timeout=15)
+                    r = requests.get(s_url, headers=headers, timeout=15)
                     r.raise_for_status()
                     
-                    ext = "vtt" if ".vtt" in url else "srt"
-                    raw_sub_path = f"{fname}_ext.{ext}"
-                    
+                    # Create a distinct filename for each sub
+                    raw_sub_path = f"{fname}.{s_lang}.{len(processed_subs)}.{s_ext}"
                     with open(raw_sub_path, "wb") as f:
                         f.write(r.content)
                     
-                    final_sub = raw_sub_path
+                    temp_files_to_clean.append(raw_sub_path)
                     
-                    if ext == "vtt":
-                        srt_name = f"{fname}.srt"
+                    # Convert VTT to SRT if embedding (better compatibility)
+                    final_sub_path = raw_sub_path
+                    if s_ext == "vtt":
+                        srt_name = f"{fname}.{s_lang}.{len(processed_subs)}.srt"
                         subprocess.run(
                             ["ffmpeg", "-y", "-v", "quiet", "-i", raw_sub_path, srt_name], 
                             check=False
                         )
-                        final_sub = srt_name
-                        StreamMerger._safe_unlink(raw_sub_path)
-                        
+                        final_sub_path = srt_name
+                        temp_files_to_clean.append(final_sub_path)
+                    
+                    processed_subs.append((final_sub_path, s_lang))
+
                 except Exception as e:
                     console.print(f"[red]{lang.get('subtitle_download_failed', error=e)}[/]")
 
-            # 2. File Discovery Phase
+            # --- 3. File Discovery Phase (Main Video) ---
             video_file = Path(f"{fname}.{video_ext}")
             
-            # Fallback discovery if exact match fails
             if not video_file.exists():
+                # Fallback discovery logic
                 f_path = Path(fname)
                 search_dir = f_path.parent
                 stem_name = f_path.name
 
                 if search_dir.exists():
                     candidates = list(search_dir.glob(f"{stem_name}.*"))
+                    # Exclude our known temp files
                     valid = [
                         f for f in candidates
                         if f.suffix not in [".json", ".srt", ".vtt", ".part", ".ytdl"]
                         and ".part" not in f.name
-                        and ".audio." not in f.name 
-                        and f != audio_file
+                        and str(f) not in [a[0] for a in valid_audio_files]
+                        and str(f) not in temp_files_to_clean
                     ]
                     if valid:
                         video_file = max(valid, key=lambda p: p.stat().st_size)
@@ -134,31 +156,42 @@ class StreamMerger:
                 console.print(f"[bold red]{lang.get('merge_video_not_found', path=video_file)}[/]")
                 return
 
-            # 3. FFmpeg Command Construction
+            # --- 4. FFmpeg Command Construction ---
             target_output_ext = "mkv" if "mkv" in mode else "mp4"
             output_file = Path(f"{fname}_final.{target_output_ext}")
 
             cmd = ["ffmpeg", "-y", "-i", str(video_file)]
 
-            if audio_file:
-                cmd.extend(["-i", str(audio_file)])
+            # Inputs: Audio
+            for a_path, _ in valid_audio_files:
+                cmd.extend(["-i", a_path])
 
-            if final_sub:
-                cmd.extend(["-i", final_sub])
+            # Inputs: Subs
+            for s_path, _ in processed_subs:
+                cmd.extend(["-i", s_path])
 
-            # Stream Mapping
-            cmd.extend(["-map", "0:v"])  # Always map video from first input
+            # Maps & Metadata
+            # Input 0 is video.
+            cmd.extend(["-map", "0:v"])
+            
+            # Map Audio (Starts at Input 1)
+            current_input_idx = 1
+            for i, (_, a_lang) in enumerate(valid_audio_files):
+                cmd.extend(["-map", f"{current_input_idx}:a"])
+                # Set Metadata: output stream a:i
+                cmd.extend([f"-metadata:s:a:{i}", f"language={a_lang}"])
+                cmd.extend([f"-metadata:s:a:{i}", f"title={a_lang.upper()} Audio"])
+                current_input_idx += 1
+            
+            # Map Subs (Starts after Audio)
+            for i, (_, s_lang) in enumerate(processed_subs):
+                cmd.extend(["-map", f"{current_input_idx}:0"])
+                # Set Metadata: output stream s:i
+                cmd.extend([f"-metadata:s:s:{i}", f"language={s_lang}"])
+                cmd.extend([f"-metadata:s:s:{i}", f"title={s_lang.upper()}"])
+                current_input_idx += 1
 
-            if audio_file:
-                cmd.extend(["-map", "1:a?"]) # Audio from second input
-            else:
-                cmd.extend(["-map", "0:a?"]) # Audio from first input
-
-            if final_sub:
-                sub_input_idx = "2" if audio_file else "1"
-                cmd.extend(["-map", f"{sub_input_idx}:0"])
-
-            # Encoding Options
+            # Codecs
             if mode == "embed_mp4":
                 cmd.extend([
                     "-c:v", "copy",
@@ -167,14 +200,12 @@ class StreamMerger:
                 ])
             elif mode == "embed_mkv":
                 cmd.extend(["-c:v", "copy"])
-                # Re-encode audio to AAC if merging separate file, else copy
-                if audio_file:
-                    cmd.extend(["-c:a", "aac"]) 
-                else:
-                    cmd.extend(["-c:a", "copy"])
+                # Copy audio streams if possible, else convert
+                cmd.extend(["-c:a", "copy"]) 
                 cmd.extend(["-c:s", "srt"])
             else:
-                cmd.extend(["-c:v", "copy", "-c:a", "copy"])
+                # Raw muxing
+                cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"])
 
             cmd.append(str(output_file))
             
@@ -182,9 +213,9 @@ class StreamMerger:
             cmd.insert(1, "-strict")
             cmd.insert(2, "experimental")
             cmd.insert(3, "-v")
-            cmd.insert(4, "info") # Needed to parse progress
+            cmd.insert(4, "info") 
 
-            # 4. Execution & Progress Monitoring
+            # --- 5. Execution & Monitoring ---
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -219,8 +250,6 @@ class StreamMerger:
                             log_buffer.pop(0)
 
                         line = line.strip()
-                        
-                        # Capture Duration
                         if total_duration_secs is None:
                             d_match = duration_pattern.search(line)
                             if d_match:
@@ -228,7 +257,6 @@ class StreamMerger:
                                 if total_duration_secs > 0:
                                     progress.update(task_id, total=total_duration_secs)
 
-                        # Capture Progress
                         if total_duration_secs:
                             t_match = time_pattern.search(line)
                             if t_match:
@@ -237,20 +265,23 @@ class StreamMerger:
             
             return_code = process.wait()
 
-            # 5. Cleanup Phase
+            # --- 6. Final Cleanup ---
             if return_code == 0 and output_file.exists() and output_file.stat().st_size > 0:
                 StreamMerger._safe_unlink(video_file)
-                StreamMerger._safe_unlink(audio_file)
+                # Cleanup all audio inputs
+                for a_path, _ in valid_audio_files:
+                    StreamMerger._safe_unlink(a_path)
+                
+                # Cleanup downloaded sub files
+                for tmp_f in temp_files_to_clean:
+                    StreamMerger._safe_unlink(tmp_f)
                 
                 final_path = Path(f"{fname}.{target_output_ext}")
                 StreamMerger._safe_unlink(final_path)
                 
                 output_file.rename(final_path)
-                StreamMerger._safe_unlink(final_sub)
-
                 console.print(f"[bold green]{lang.get('muxing_complete', filename=final_path.name)}[/]")
             else:
-                # Failure
                 console.print(f"[bold red]{lang.get('muxing_error')}[/]")
                 if log_buffer:
                     console.print(f"[dim]{lang.get('last_log_label', log=log_buffer[-1])}[/]")

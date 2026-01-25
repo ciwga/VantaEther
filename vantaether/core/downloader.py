@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 import yt_dlp
 from yt_dlp.utils import DownloadError
@@ -37,8 +37,6 @@ class DownloadManager:
     This class orchestrates the download process for streams intercepted
     by the browser agent, handling cookie injection, header spoofing,
     and manual stream merging logic.
-    
-    Note: Native URL handling has been moved to vantaether.core.native.NativeDownloader.
     """
 
     def __init__(self) -> None:
@@ -84,8 +82,8 @@ class DownloadManager:
         self,
         target: Dict[str, Any],
         fmt: Any,
-        audio_id: Optional[str],
-        sub: Any,
+        audio_ids: Optional[List[Dict[str, Any]]],
+        subs: List[Dict[str, Any]],
         embed_mode: str,
         c_file: str,
         filename: str,
@@ -98,8 +96,8 @@ class DownloadManager:
         Args:
             target (Dict): The captured target metadata.
             fmt (Any): Selected video format options.
-            audio_id (Optional[str]): Selected audio format ID.
-            sub (Any): Selected subtitle options.
+            audio_ids (Optional[List[Dict]]): List of selected audio formats.
+            subs (List[Dict]): List of selected subtitle dicts.
             embed_mode (str): Mode for embedding subtitles/muxing.
             c_file (str): Path to the generated Netscape cookie file.
             filename (str): The desired output filename.
@@ -138,8 +136,11 @@ class DownloadManager:
                 "progress_hooks": [self._progress_hook],
             }
 
-            if sub and sub.get("type") == "internal":
-                ydl_opts["subtitleslangs"] = [sub["lang"]]
+            # Internal Subs handling (native yt-dlp) - only if ONE sub selected and it's internal
+            # If multiple or external, we handle it in Merge Phase.
+            internal_subs_to_dl = [s["lang"] for s in subs if s.get("type") == "internal"]
+            if internal_subs_to_dl:
+                ydl_opts["subtitleslangs"] = internal_subs_to_dl
                 ydl_opts["writesubtitles"] = True
 
             success = False
@@ -147,8 +148,12 @@ class DownloadManager:
             # Check if format ID is an internal JSON/Virtual ID
             is_virtual_format = fmt and str(fmt.get("format_id", "")).startswith("json_")
 
-            if not force_mode and fmt and audio_id and not is_virtual_format:
-                # Manual Split: Download Video and Audio separately, then merge by yt-dlp or manually
+            downloaded_audio_files: List[Tuple[str, str]] = [] # (filepath, lang)
+
+            if not force_mode and fmt and audio_ids and not is_virtual_format:
+                # --- Multi-Stream Download Mode ---
+                
+                # 1. Video Stream
                 console.print(f"[cyan]{lang.get('processing_video', format_id=fmt['format_id'])}[/]")
                 opts_video = ydl_opts.copy()
                 opts_video["format"] = fmt["format_id"]
@@ -158,28 +163,47 @@ class DownloadManager:
                 video_fname = f"{filename}{lang.get('suffix_video')}"
                 v_success = self._start_download(opts_video, target["url"], video_fname)
 
-                console.print(f"[cyan]{lang.get('processing_audio', format_id=audio_id)}[/]")
-                opts_audio = ydl_opts.copy()
-                opts_audio["format"] = audio_id
-                opts_audio["outtmpl"] = f"{base_output}.audio.%(ext)s"
-                opts_audio["writesubtitles"] = False
-                opts_audio["concurrent_fragment_downloads"] = 1
-                opts_audio["ignoreerrors"] = False
+                # 2. Audio Streams (Loop through all selected audios)
+                a_success_all = True
+                for idx, aud in enumerate(audio_ids):
+                    a_id = aud.get("format_id")
+                    a_lang = aud.get("language") or aud.get("format_note") or "und"
+                    
+                    console.print(f"[cyan]{lang.get('processing_audio', format_id=a_id, lang=a_lang)}[/]")
+                    
+                    opts_audio = ydl_opts.copy()
+                    opts_audio["format"] = a_id
+                    # Append index to filename to prevent overwriting same extensions
+                    audio_final_name = f"{filename}.audio.{idx}.{a_lang}" 
+                    opts_audio["outtmpl"] = str(self.download_path / f"{audio_final_name}.%(ext)s")
+                    opts_audio["writesubtitles"] = False
+                    opts_audio["concurrent_fragment_downloads"] = 1
+                    opts_audio["ignoreerrors"] = False
 
-                audio_fname = f"{filename}{lang.get('suffix_audio')}"
-                a_success = self._start_download(opts_audio, target["url"], audio_fname)
-                
-                success = v_success and a_success
+                    if self._start_download(opts_audio, target["url"], f"{lang.get('suffix_audio')} ({a_lang})"):
+                        # Detect the actual file extension yt-dlp used
+                        # We use a simple glob matching because we know the base pattern
+                        potential_files = list(self.download_path.glob(f"{audio_final_name}.*"))
+                        if potential_files:
+                             # Pick the largest one (usually the media file)
+                             actual_audio_file = max(potential_files, key=lambda p: p.stat().st_size)
+                             downloaded_audio_files.append((str(actual_audio_file), a_lang))
+                        else:
+                            a_success_all = False
+                    else:
+                        a_success_all = False
+
+                success = v_success and a_success_all
             else:
-                # Standard Auto-Merge or Simple Download
+                # --- Simple/Auto Mode ---
                 if force_mode or is_virtual_format:
-                    # If it's a direct file (virtual format) or forced, let yt-dlp figure out the best single file
                     ydl_opts["format"] = "bestvideo+bestaudio/best"
                 else:
                     ydl_opts["format"] = fmt["format_id"] if fmt else "best"
 
                 ydl_opts["outtmpl"] = f"{base_output}.%(ext)s"
 
+                # Container selection
                 if embed_mode == "embed_mkv":
                     ydl_opts["merge_output_format"] = "mkv"
                 elif embed_mode == "embed_mp4":
@@ -199,27 +223,34 @@ class DownloadManager:
                 console.print(f"[red]{lang.get('file_detection_failed', error=fse)}[/]")
                 return False
 
+            # If an orphan audio was found in Auto mode, treat it as primary audio
+            if orphan_audio_file:
+                downloaded_audio_files.insert(0, (str(orphan_audio_file), "und"))
+
             if found_file:
                 is_container_mismatch = (
                     (embed_mode == "embed_mkv" and actual_ext != "mkv") or 
                     (embed_mode == "embed_mp4" and actual_ext != "mp4")
                 )
 
+                # Collect EXTERNAL subs for merging
+                ext_subs = [s for s in subs if s.get("type") == "external"]
+
                 should_merge = (
-                    (sub and sub.get("type") == "external") or 
-                    (orphan_audio_file is not None) or
+                    len(ext_subs) > 0 or 
+                    len(downloaded_audio_files) > 0 or
                     is_container_mismatch
                 )
 
                 if should_merge:
                     try:
                         StreamMerger.process_external_sub_sync(
-                            sub["url"] if (sub and sub.get("type") == "external") else None,
-                            str(base_output),
-                            embed_mode,
-                            http_headers,
-                            actual_ext,
-                            str(orphan_audio_file) if orphan_audio_file else None,
+                            subtitle_urls=ext_subs,
+                            fname=str(base_output),
+                            mode=embed_mode,
+                            headers=http_headers,
+                            video_ext=actual_ext,
+                            audio_files=downloaded_audio_files,
                         )
                     except Exception as e:
                         console.print(f"[red]{lang.get('merge_failed_generic', error=e)}[/]")                        

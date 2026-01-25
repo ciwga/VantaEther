@@ -398,7 +398,7 @@ class VantaEngine:
 
     def analyze_and_select(
         self, target: Dict[str, Any]
-    ) -> Tuple[Optional[Dict], Optional[str], Optional[Dict], str, str, bool]:
+    ) -> Tuple[Optional[Dict], Optional[List[Dict]], List[Dict], str, str, bool]:
         """
         Analyzes the target stream using yt-dlp and handles format/subtitle selection.
 
@@ -406,7 +406,8 @@ class VantaEngine:
             target: The captured item.
 
         Returns:
-            Tuple of selection data (format, audio_id, sub, embed_mode, cookie_file, force_mode).
+            Tuple of selection data (format, audio_ids, sub_list, embed_mode, cookie_file, force_mode).
+            Updated to return Lists for audios and subs.
         """
         # Cookie & Header generation
         c_file = ""
@@ -439,9 +440,10 @@ class VantaEngine:
                 if selected_fmt:
                     target["url"] = selected_fmt["url"]
                     # FORCE MODE = TRUE (Since we have a direct file URL now, we skip yt-dlp format selection)
-                    return selected_fmt, None, None, "raw", c_file, True
+                    # NOTE: JSON APIs rarely give separate audio tracks in this specific parser logic
+                    return selected_fmt, [], [], "raw", c_file, True
                 else:
-                    return None, None, None, "cancel", "", False
+                    return None, [], [], "cancel", "", False
 
         # --- STANDARD YT-DLP EXTRACTION ---
         ydl_opts = {
@@ -463,10 +465,10 @@ class VantaEngine:
         except Exception as e:
             console.print(f"[bold red]{lang.get('analysis_failed')}[/]: {e}")
             if Confirm.ask(f"[bold yellow]{lang.get('try_raw')}[/]", default=True):
-                return None, None, None, "raw", c_file, True
+                return None, [], [], "raw", c_file, True
             else:
                 self._safe_delete(c_file)
-                return None, None, None, "cancel", "", False
+                return None, [], [], "cancel", "", False
 
         if target.get("media_type") in ["stream_api", "embed"] or "embed" in target["url"]:
              console.print(Panel(
@@ -484,7 +486,7 @@ class VantaEngine:
             force_mode = True
 
         # Audio Selection Logic
-        selected_audio_id = None
+        selected_audio_ids: List[Dict[str, Any]] = []
         if selected_fmt:
             acodec = selected_fmt.get("acodec")
             # Check if video has no audio but other audio streams exist
@@ -496,9 +498,9 @@ class VantaEngine:
             )
 
             if should_prompt:
-                audio_fmt = self.selector.select_audio_format(formats)
-                if audio_fmt:
-                    selected_audio_id = audio_fmt["format_id"]
+                audio_fmts = self.selector.select_audio_format(formats)
+                if audio_fmts:
+                    selected_audio_ids = audio_fmts
 
         # Subtitle Logic
         subs_map = {}
@@ -519,22 +521,30 @@ class VantaEngine:
         # 2. External Subtitles
         sub_idx = self.subtitle_processor.process_subtitles(subs_map, sub_idx)
 
-        selected_sub = None
+        selected_subs: List[Dict] = []
         embed_mode = "none"
 
         if subs_map:
             self._render_subtitle_table(subs_map)
             if Confirm.ask(lang.get("download_subs"), default=True):
-                s_choice = Prompt.ask(lang.get("choice"), choices=list(subs_map.keys()))
-                selected_sub = subs_map[s_choice]
+                # Using manual Multi-Selection parsing here for subtitles too
+                raw_choices = Prompt.ask(lang.get("select_subs_prompt"), default="all")
+                selected_indices = self.selector._parse_multi_selection(raw_choices, len(subs_map))
                 
-                console.print(lang.get("embed_mode_prompt"))
-                m = Prompt.ask(lang.get("embed_mode_choice"), choices=["1", "2", "3", "4"], default="3")
-                embed_mode = {
-                    "1": "convert_srt", "2": "embed_mp4", "3": "embed_mkv", "4": "raw"
-                }[m]
+                # Convert 0-based indices back to string keys used in subs_map (1-based)
+                for idx in selected_indices:
+                    key = str(idx + 1) 
+                    if key in subs_map:
+                        selected_subs.append(subs_map[key])
 
-        return selected_fmt, selected_audio_id, selected_sub, embed_mode, c_file, force_mode
+                if selected_subs:
+                    console.print(lang.get("embed_mode_prompt"))
+                    m = Prompt.ask(lang.get("embed_mode_choice"), choices=["1", "2", "3", "4"], default="3")
+                    embed_mode = {
+                        "1": "convert_srt", "2": "embed_mp4", "3": "embed_mkv", "4": "raw"
+                    }[m]
+
+        return selected_fmt, selected_audio_ids, selected_subs, embed_mode, c_file, force_mode
 
     def _render_subtitle_table(self, subs_map: Dict[str, Dict]) -> None:
         """Helper to render subtitles."""
@@ -564,7 +574,7 @@ class VantaEngine:
                 default_title = target.get("title") or lang.get("default_filename_base")
                 fname = self.file_manager.get_user_filename(default_title)
                 
-                fmt, audio_id, sub, mode, c_file, force = self.analyze_and_select(target)
+                fmt, audio_ids, subs, mode, c_file, force = self.analyze_and_select(target)
                 
                 if mode == "cancel":
                     console.print(f"[yellow]{lang.get('cancelled')}[/]")
@@ -572,11 +582,13 @@ class VantaEngine:
 
                 if fmt or force:
                     success = self.download_manager.download_stream(
-                        target, fmt, audio_id, sub, mode, c_file, fname, force
+                        target, fmt, audio_ids, subs, mode, c_file, fname, force
                     )
                     if success and Confirm.ask(f"{lang.get('create_technical_report')}", default=True):
+                        # For report we just pass the first sub/audio as sample info
+                        sample_sub = subs[0] if subs else None
                         self.report_generator.create_report(
-                            fname, target["url"], format_info=fmt, subtitle_info=sub
+                            fname, target["url"], format_info=fmt, subtitle_info=sample_sub
                         )
                 else:
                     console.print(f"[bold red]{lang.get('download_error', error=lang.get('init_failed'))}[/]")

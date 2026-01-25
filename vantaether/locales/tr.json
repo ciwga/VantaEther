@@ -119,7 +119,7 @@
     "exists": "✔ Var",
     "video_only": "❌ Video Only (Merge Gerekli)",
     "audio_sources": "SES KAYNAKLARI",
-    "audio_choice": "Ses Seçimi",
+    "audio_choice": "Ses Seçimi (Örn: 1 veya 1,2 veya all)",
     "audio_only_active": "⚠ Sadece Ses Modu Aktif: MP3 Ayrıştırılıyor...",
     "api_stream_warning_title": "API AKIŞI TESPİT EDİLDİ",
     "api_stream_warning_body": [
@@ -134,11 +134,11 @@
     "embed_mode_prompt": [
         "1. İndir (.srt çevir)",
         "2. Göm (MP4)",
-        "3. Göm (MKV - Önerilen)",
+        "3. Göm (MKV - Çoklu Ses/Altyazı İçin Önerilen)",
         "4. Ham (Raw)"
     ],
     "embed_mode_choice": "Mod",
-    "download_external_sub": "Harici Altyazı İndiriliyor...",
+    "download_external_sub": "Harici Altyazı İndiriliyor ({lang})...",
 
     "filename_prompt": "Dosya Adı (Varsayılan için Enter)",
     "filename_detected": "Algılanan İsim: {name}",
@@ -146,14 +146,14 @@
     "download_starting": "🚀 BAŞLATILIYOR: {filename}",
     "processing": "İşleniyor: {filename}...",
     "processing_video": "Video Akışı İndiriliyor (ID: {format_id})...",
-    "processing_audio": "Ses Akışı İndiriliyor (ID: {format_id})...",
+    "processing_audio": "Ses Akışı İndiriliyor (ID: {format_id} | Dil: {lang})...",
     "processing_item": "İşleniyor {index}/{total}: {title}",
     "invalid_audio_file": "Birleştirme işlemi atlanıyor: Ses dosyası eksik veya bulunamadı: {audio_file}",
     "download_success": "✔ İŞLEM BAŞARILI",
     "download_error": "İndirme Hatası: {error}",
     "download_error_403": "❌ İndirme Başarısız (HTTP 403): Çerezler veya erişim yetkisi geçersiz. (Sayfa yenilemeyi deneyin)",
     "download_error_drm": "❌ İndirme Başarısız (DRM): Bu içerik DRM korumalı ve indirilemez.",
-    "manual_muxing": "Manuel Birleştirme (Muxing) Başlatılıyor...",
+    "manual_muxing": "Çoklu Akış Birleştirme (Muxing) Başlatılıyor...",
     "ffmpeg_processing": "FFmpeg İşleniyor...",
     "muxing_complete": "✔ TAMAMLANDI: {filename}",
     "muxing_error": "Akış Birleştirme Hatası:",
@@ -300,5 +300,9 @@
     "client_attempt_failed": "⚠ {client} başarısız: {error}",
     "json_api_scan_start": "🔍 JSON API Tespit Edildi. İçerik taranıyor...",
     "json_api_scan_success": "✔ JSON İçinde {count} adet video bağlantısı bulundu!",
-    "json_api_scan_failed": "❌ JSON API Tarama Hatası: {error}"
+    "json_api_scan_failed": "❌ JSON API Tarama Hatası: {error}",
+
+    "selection_invalid": "❌ Geçersiz seçim! Lütfen 1,2,3 formatında veya 'all' kullanın.",
+    "select_subs_prompt": "Altyazı Seçimi (Örn: 1,3 veya 'all' veya 'none')",
+    "merging_multistream": "🚀 Çoklu Akış Birleştiriliyor: {video_count} Video + {audio_count} Ses + {sub_count} Altyazı"
 }

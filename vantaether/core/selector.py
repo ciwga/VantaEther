@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from rich.table import Table
 from rich.prompt import Prompt
@@ -16,6 +16,51 @@ class FormatSelector:
     Handles the interactive selection of media formats (video/audio).
     Provides robust parsing of yt-dlp format data to prevent UI crashes.
     """
+
+    def _parse_multi_selection(self, choice_str: str, max_idx: int) -> List[int]:
+        """
+        Parses user input strings like "1", "1,3", "1-3", "all".
+
+        Args:
+            choice_str (str): The input string from the user.
+            max_idx (int): The maximum valid index (number of items).
+
+        Returns:
+            List[int]: A list of zero-based indices selected.
+        """
+        choice_str = choice_str.lower().strip()
+        indices: Set[int] = set()
+
+        if choice_str == "all":
+            return list(range(max_idx))
+        
+        if choice_str == "none":
+            return []
+
+        try:
+            parts = choice_str.split(',')
+            for part in parts:
+                part = part.strip()
+                if '-' in part:
+                    # Handle ranges like "1-3"
+                    start, end = map(int, part.split('-'))
+                    # User sees 1-based, internal is 0-based
+                    # Ensure range is valid within bounds
+                    start = max(1, start)
+                    end = min(max_idx, end)
+                    if start <= end:
+                        for i in range(start, end + 1):
+                            indices.add(i - 1)
+                else:
+                    # Handle single digits like "1"
+                    idx = int(part)
+                    if 1 <= idx <= max_idx:
+                        indices.add(idx - 1)
+        except ValueError:
+            console.print(f"[bold red]{lang.get('selection_invalid')}[/]")
+            return []
+
+        return sorted(list(indices))
 
     def select_video_format(
         self, formats: List[Dict[str, Any]]
@@ -112,15 +157,15 @@ class FormatSelector:
 
     def select_audio_format(
         self, formats: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[List[Dict[str, Any]]]:
         """
-        Displays available audio-only streams and prompts the user to select one.
+        Displays available audio-only streams and prompts the user to select one OR multiple.
         
         Args:
             formats: Raw format list.
 
         Returns:
-            Selected audio format dict or None.
+            Optional[List[Dict[str, Any]]]: A list of selected audio format dicts or None.
         """
         # Strict filter for audio-only streams
         audio_formats = [
@@ -170,10 +215,14 @@ class FormatSelector:
 
         console.print(table)
 
-        choices = [str(i) for i in range(1, len(unique_audios) + 1)]
-        a_choice = Prompt.ask(
+        raw_choice = Prompt.ask(
             lang.get("audio_choice"),
-            choices=choices,
             default="1",
         )
-        return unique_audios[int(a_choice) - 1]
+        
+        selected_indices = self._parse_multi_selection(raw_choice, len(unique_audios))
+        
+        if not selected_indices:
+            return None
+            
+        return [unique_audios[i] for i in selected_indices]
