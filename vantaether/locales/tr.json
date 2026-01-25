@@ -95,6 +95,7 @@
     "mp4_suffix": " (MP4)",
     "suffix_video": " [Video]",
     "suffix_audio": " [Ses]",
+    "hidden_stream_label": " (GİZLİ AKIŞ: {type})",
     "capture_add_error": "Yakalama öğesi eklenirken hata: {error}",
     "sub_capture_warning": "Altyazı yakalama uyarısı: {current_idx} sırasında geçersiz/boş URL tespit edildi.",
 

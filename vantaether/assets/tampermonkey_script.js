@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         VantaEther Sync Agent v2.1.1
+// @name         VantaEther Sync Agent v2.2.0
 // @namespace    {{SERVER_URL}}/
-// @version      2.1.1
+// @version      2.2.0
 // @description  Combines Visual Notifications, Iframe Injection, File Sniffing and API/Embed Detection.
 // @match        *://*/*
 // @connect      {{SERVER_HOST}}
@@ -10,12 +10,13 @@
 // ==/UserScript==
 
 /**
- * @fileoverview VantaEther Sync Agent v2.1
+ * @fileoverview VantaEther Sync Agent v2.2.0
  * This script intercepts network requests (Fetch, XHR) and monitors DOM changes
  * to detect video streams, licenses, and API endpoints, sending them to a local server.
  * * IMPROVEMENTS:
  * - Memory leak protection (Set and Queue caps).
  * - Performance checks.
+ * - Content-Type Sniffing for obfuscated streams.
  */
 
 (function() {
@@ -183,12 +184,13 @@
      * Analyzes intercepted URLs to detect media streams, licenses, or APIs.
      * * @param {string} url - The URL to analyze.
      * @param {string} source - The source of the interception (e.g., 'FETCH', 'XHR').
+     * @param {string|null} [contentType=null] - The HTTP Content-Type header if available.
      */
-    function analyze(url, source) {
+    function analyze(url, source, contentType = null) {
         if (!url || typeof url !== 'string') return;
         if (url.startsWith('data:') || url.startsWith('blob:')) return;
-        // Ignore common static assets
-        if (url.match(/\.(png|jpg|jpeg|gif|css|woff|woff2|svg|ico|js|json)$/i)) return;
+        // Ignore common static assets unless we have a specific content type telling us otherwise
+        if (!contentType && url.match(/\.(png|jpg|jpeg|gif|css|woff|woff2|svg|ico|js|json)$/i)) return;
 
         // 1. Classic File Extension Detection
         const isMpd = url.includes('.mpd') || url.includes('dash');
@@ -203,11 +205,24 @@
                             /\/q\/\d+/.test(url) ||
                             url.includes('/api/video/') ||
                             url.includes('/player/api');
+        
+        // 3. Header-Based Detection (For obfuscated URLs)
+        let isHeaderHls = false;
+        let isHeaderDash = false;
+        
+        if (contentType) {
+            const ct = contentType.toLowerCase();
+            isHeaderHls = ct.includes('application/vnd.apple.mpegurl') || 
+                          ct.includes('application/x-mpegurl') ||
+                          ct.includes('video/mp2t');
+            
+            isHeaderDash = ct.includes('application/dash+xml');
+        }
 
         // Send debug log for analysis
         sendRemoteLog(`[${source}] ${url.substring(0, 100)}`, 'DEBUG');
 
-        if (!isMpd && !isHls && !isLicense && !isVideoFile && !isPlayerApi && !isSub) return;
+        if (!isMpd && !isHls && !isLicense && !isVideoFile && !isPlayerApi && !isSub && !isHeaderHls && !isHeaderDash) return;
         
         if (sent.has(url)) return;
         sent.add(url);
@@ -219,10 +234,11 @@
         let type = 'video';
         let notifColor = '#00ff41'; // Green
 
-        if (isLicense) { type = 'license'; notifColor = '#ff9900'; }
-        else if (isMpd) { type = 'manifest_dash'; notifColor = '#ff00ff'; } // Magenta
+        if (isLicense) { type = 'license'; notifColor = '#ff9900'; } // Orange
+        else if (isMpd || isHeaderDash) { type = 'manifest_dash'; notifColor = '#ff00ff'; } // Magenta
         else if (isSub) { type = 'sub'; notifColor = '#00ffff'; } // Cyan
         else if (isPlayerApi) { type = 'stream_api'; notifColor = '#ffff00'; } // Yellow
+        else if (isHeaderHls) { type = 'manifest_hls'; notifColor = '#00ff41'; } // Green
 
         // Display Notification and Log Success
         showNotification(`⚡ ${type.toUpperCase()}: ${source}`, notifColor);
@@ -245,32 +261,62 @@
     const originalFetch = window.fetch;
     /**
      * Overrides window.fetch to capture network requests.
+     * inspects BOTH the request URL and the response Headers.
      * @param {...*} args - Fetch arguments.
      * @returns {Promise<Response>} The original fetch response.
      */
-    window.fetch = function(...args) {
+    window.fetch = async function(...args) {
         const [resource] = args;
         const url = (resource instanceof Request) ? resource.url : resource;
+        
+        // Preliminary check based on URL
         analyze(url, "FETCH");
-        return originalFetch.apply(this, args);
+
+        try {
+            const response = await originalFetch.apply(this, args);
+            // Deep check based on Headers (for obfuscated streams)
+            const type = response.headers.get('content-type');
+            if (type) {
+                analyze(response.url, "FETCH_HEADER", type);
+            }
+            return response;
+        } catch (e) {
+            // If fetch fails, we just propagate the error, 
+            // initial analyze call covered the request.
+            throw e;
+        }
     };
 
     // 2. XMLHttpRequest Interceptor
     const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+
     /**
      * Overrides XMLHttpRequest.open to capture XHR requests and redirects.
      * @param {string} method - The HTTP method.
      * @param {string} url - The request URL.
      */
     XMLHttpRequest.prototype.open = function(method, url) {
+        this._vantaUrl = url; // Store URL for later use
         analyze(url, "XHR");
+        return originalOpen.apply(this, arguments);
+    };
+
+    /**
+     * Overrides XMLHttpRequest.send to attach listeners for header inspection.
+     */
+    XMLHttpRequest.prototype.send = function() {
         this.addEventListener('readystatechange', function() {
-            // Check for redirects on request completion
-            if (this.readyState === 4 && this.responseURL && this.responseURL !== url) {
-                analyze(this.responseURL, "XHR_REDIR");
+            // Check headers when headers are received (HEADERS_RECEIVED = 2) or DONE (4)
+            if (this.readyState === 4) {
+                const responseURL = this.responseURL || this._vantaUrl;
+                const type = this.getResponseHeader("Content-Type");
+                if (type && responseURL) {
+                     analyze(responseURL, "XHR_HEADER", type);
+                }
             }
         });
-        return originalOpen.apply(this, arguments);
+        return originalSend.apply(this, arguments);
     };
 
     // 3. EME (DRM) Interceptor
@@ -313,8 +359,18 @@
                         // Hook fetch inside the iframe context
                         w.fetch = async function(...args) {
                             const [res] = args;
-                            analyze((res instanceof Request) ? res.url : res, "IFRAME_FETCH");
-                            return iframeFetch.apply(this, args);
+                            const url = (res instanceof Request) ? res.url : res;
+                            
+                            analyze(url, "IFRAME_FETCH");
+
+                            try {
+                                const response = await iframeFetch.apply(this, args);
+                                const type = response.headers.get('content-type');
+                                if (type) {
+                                    analyze(response.url, "IFRAME_HEADER", type);
+                                }
+                                return response;
+                            } catch (e) { throw e; }
                         };
                     }
                 } catch(e) { 

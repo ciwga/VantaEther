@@ -95,6 +95,7 @@
     "mp4_suffix": " (MP4)",
     "suffix_video": " [Video]",
     "suffix_audio": " [Audio]",
+    "hidden_stream_label": " (HIDDEN STREAM: {type})",
     "capture_add_error": "Error adding captured item: {error}",
     "sub_capture_warning": "Subtitle capture warning: Empty URL at index {current_idx}",
 

@@ -210,7 +210,7 @@ class VantaEngine:
             source = vid.get("source", lang.get("unknown"))
             t_type = vid.get("media_type", "")
 
-            # Determine formatted type label
+            # Determine formatted type label based on media_type OR url
             ftype = source
             if "master" in u:
                 ftype += f" [bold yellow]{lang.get('master_suffix')}[/]"
@@ -220,6 +220,10 @@ class VantaEngine:
                 ftype += f" [bold yellow]{lang.get('api_embed_suffix')}[/]"
             elif "mp4" in u:
                 ftype += lang.get("mp4_suffix")
+            else:
+                # Fallback for header-sniffed content without obvious extension
+                label = lang.get("hidden_stream_label", type=t_type.upper())
+                ftype += f" [dim cyan]{label}[/]"
 
             display_url = self.format_smart_display_url(u)
             table.add_row(str(idx), ftype, display_url)
