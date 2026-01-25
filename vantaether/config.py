@@ -10,6 +10,11 @@ VERSION: Final[str] = __version__
 SERVER_HOST: str = "127.0.0.1"
 SERVER_PORT: int = 5005
 SERVER_URL: str = f"http://{SERVER_HOST}:{SERVER_PORT}"
+
+# --- UI CONFIGURATION ---
+# Controls whether the fake startup loading bar is skipped.
+SKIP_STARTUP_ANIMATION: bool = False
+
 # --- DEBUGGING ---
 DEBUG_MODE: bool = False
 
@@ -45,3 +50,14 @@ def configure_server(host: Optional[str] = None, port: Optional[int] = None) -> 
         SERVER_PORT = port
 
     SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
+
+
+def configure_ui(skip_animation: bool = False) -> None:
+    """
+    Updates UI configuration settings at runtime.
+
+    Args:
+        skip_animation (bool): If True, the startup progress bar will be suppressed.
+    """
+    global SKIP_STARTUP_ANIMATION
+    SKIP_STARTUP_ANIMATION = skip_animation

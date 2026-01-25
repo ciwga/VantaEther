@@ -1,5 +1,6 @@
 import time
 from typing import Final, Optional
+
 from rich.console import Console
 from rich.align import Align
 from rich.progress import (
@@ -12,6 +13,8 @@ from rich.progress import (
     Task
 )
 from rich.text import Text
+
+import vantaether.config as config
 from vantaether.config import BANNER, VERSION
 from vantaether.utils.i18n import LanguageManager
 
@@ -137,7 +140,11 @@ def render_banner(console: Console) -> None:
 def show_startup_sequence(console: Console, lang: LanguageManager) -> None:
     """
     Displays a stylized startup progress bar to simulate system initialization.
+    Respects the SKIP_STARTUP_ANIMATION flag in config.
     """
+    if config.SKIP_STARTUP_ANIMATION:
+        return
+
     loading_text = lang.get("system_starting", default="INITIALIZING SYSTEM...")
     ready_text = lang.get("ready_status", default="✔ SYSTEM READY")
 

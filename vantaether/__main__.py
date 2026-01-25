@@ -120,10 +120,21 @@ def main() -> None:
         help=lang.get("cli_help_console", default="Show Browser Logs")
     )
 
+    parser.add_argument(
+        "--no-animation",
+        action="store_true",
+        help=lang.get("cli_help_no_anim", default="Skip startup animation")
+    )
+
     args = parser.parse_args()
 
+    # Configure Runtime Settings
     if args.port or args.host:
         config.configure_server(host=args.host, port=args.port)
+
+    # Configure UI Settings
+    if args.no_animation:
+        config.configure_ui(skip_animation=True)
 
     # --- LEGAL CHECK ---
     if not show_legal_disclaimer():
