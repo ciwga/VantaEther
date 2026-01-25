@@ -52,7 +52,17 @@ The application relies heavily on **FFmpeg** and **FFprobe** for stream merging,
 
 ## 📥 Installation
 
-It is recommended to use a virtual environment to maintain a clean workspace.
+You can now easily install VantaEther directly from PyPI.
+
+```bash
+pip install VantaEther
+```
+
+After installation, you can run the app globally using the command: ```vantaether```
+
+---
+
+Alternatively, you can install from the source. It is recommended to use a virtual environment to maintain a clean workspace.
 
 1.  **Clone the repository:**
     ```bash
